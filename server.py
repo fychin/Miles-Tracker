@@ -4,21 +4,29 @@ Miles & Points Tracker — Backend API
 Stack: Python · Flask · SQLite
 """
 
-import sqlite3
 import json
 import os
 import time
 import urllib.request
 import urllib.error
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, g
+from flask import Flask, request, jsonify, send_from_directory
+from db import get_db, close_db, init_db, DB_PATH
 
 # ── Config ──────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-DB_PATH    = os.path.join(BASE_DIR, "data", "tracker.db")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 PORT       = int(os.environ.get("PORT", 3000))
 DEBUG      = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+# Platform-agnostic strftime: %-d works on Unix (glibc), %#d on Windows.
+# Using a helper avoids scattering platform checks and DeprecationWarnings
+# from strftime format directives across the codebase.
+def _format_date(dt):
+    """Format a datetime as 'D Mon YYYY' (e.g. '3 Sep 2026'), locale-independent
+    of the platform's strftime non-zero-padding directive."""
+    day_fmt = "%-d" if os.name == "posix" else "%#d"
+    return dt.strftime(f"{day_fmt} %b %Y")
 
 # Public, keyless airport database (IATA/ICAO, lat/lon, city, country).
 # Source: https://github.com/mwgg/Airports — maintained public dataset, ~29k airports.
@@ -26,143 +34,16 @@ AIRPORTS_SOURCE_URL   = "https://raw.githubusercontent.com/mwgg/Airports/master/
 AIRPORTS_CACHE_PATH   = os.path.join(BASE_DIR, "data", "airports_cache.json")
 AIRPORTS_CACHE_MAX_AGE = 30 * 24 * 3600  # 30 days — airport coordinates rarely change
 
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder=STATIC_DIR)
+app.teardown_appcontext(close_db)
 
-# ── Database helpers ─────────────────────────────────────────────────────────
-def get_db():
-    if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
-    return g.db
-
-@app.teardown_appcontext
-def close_db(exc=None):
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
-
-def init_db():
-    """Create tables if they don't exist (idempotent)."""
-    with app.app_context():
-        db = get_db()
-        db.executescript("""
-            CREATE TABLE IF NOT EXISTS ffp_balances (
-                id         TEXT PRIMARY KEY,
-                miles      INTEGER  NOT NULL DEFAULT 0,
-                expiry     TEXT     NOT NULL DEFAULT '',
-                notes      TEXT     NOT NULL DEFAULT '',
-                updated_at TEXT     NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS bank_balances (
-                id         TEXT PRIMARY KEY,
-                points     INTEGER  NOT NULL DEFAULT 0,
-                expiry     TEXT     NOT NULL DEFAULT '',
-                updated_at TEXT     NOT NULL DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS activity_log (
-                id         INTEGER  PRIMARY KEY AUTOINCREMENT,
-                ts         TEXT     NOT NULL DEFAULT (datetime('now')),
-                kind       TEXT     NOT NULL,
-                record_id  TEXT     NOT NULL,
-                old_val    INTEGER,
-                new_val    INTEGER,
-                note       TEXT     DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS redemptions (
-                id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-                program_id  TEXT     NOT NULL,
-                travel_date TEXT     NOT NULL DEFAULT '',
-                miles_used  INTEGER  NOT NULL DEFAULT 0,
-                cabin       TEXT     NOT NULL DEFAULT '',
-                route       TEXT     NOT NULL DEFAULT '',
-                airline     TEXT     NOT NULL DEFAULT '',
-                one_way     INTEGER  NOT NULL DEFAULT 0,
-                notes       TEXT     NOT NULL DEFAULT '',
-                cash_value  REAL     NOT NULL DEFAULT 0,
-                taxes_fees  REAL     NOT NULL DEFAULT 0,
-                created_at  TEXT     NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS cost_entries (
-                id             INTEGER  PRIMARY KEY AUTOINCREMENT,
-                program_id     TEXT     NOT NULL,
-                entry_date     TEXT     NOT NULL DEFAULT '',
-                source         TEXT     NOT NULL DEFAULT '',
-                miles_acquired INTEGER  NOT NULL DEFAULT 0,
-                cost_sgd       REAL     NOT NULL DEFAULT 0,
-                notes          TEXT     NOT NULL DEFAULT '',
-                created_at     TEXT     NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS cost_transfer_links (
-                id                  INTEGER  PRIMARY KEY AUTOINCREMENT,
-                transfer_entry_id   INTEGER  NOT NULL,
-                source_entry_id     INTEGER  NOT NULL,
-                miles_consumed      INTEGER  NOT NULL DEFAULT 0,
-                dest_miles          INTEGER  NOT NULL DEFAULT 0,
-                inherited_cost      REAL     NOT NULL DEFAULT 0,
-                fee_share           REAL     NOT NULL DEFAULT 0,
-                conversion_rate     REAL     NOT NULL DEFAULT 0,
-                source_rate_label   TEXT     NOT NULL DEFAULT '',
-                created_at          TEXT     NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY (transfer_entry_id) REFERENCES cost_entries(id) ON DELETE CASCADE,
-                FOREIGN KEY (source_entry_id)   REFERENCES cost_entries(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key    TEXT PRIMARY KEY,
-                value  TEXT NOT NULL DEFAULT ''
-            );
-        """)
-
-        # Idempotent migration: add cash_value/taxes_fees/origin/destination/via to pre-existing redemptions tables
-        cols = {r["name"] for r in db.execute("PRAGMA table_info(redemptions)").fetchall()}
-        if "cash_value" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN cash_value REAL NOT NULL DEFAULT 0")
-        if "taxes_fees" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN taxes_fees REAL NOT NULL DEFAULT 0")
-        if "origin" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN origin TEXT NOT NULL DEFAULT ''")
-        if "destination" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN destination TEXT NOT NULL DEFAULT ''")
-        if "via" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN via TEXT NOT NULL DEFAULT ''")
-        if "block_time_minutes" not in cols:
-            db.execute("ALTER TABLE redemptions ADD COLUMN block_time_minutes INTEGER NOT NULL DEFAULT 0")
-
-        # Idempotent migration: lot-tracking fields on cost_entries (supports transfer reconciliation)
-        cost_cols = {r["name"] for r in db.execute("PRAGMA table_info(cost_entries)").fetchall()}
-        if "entry_type" not in cost_cols:
-            db.execute("ALTER TABLE cost_entries ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'acquisition'")
-        if "remaining_miles" not in cost_cols:
-            db.execute("ALTER TABLE cost_entries ADD COLUMN remaining_miles INTEGER NOT NULL DEFAULT 0")
-            # Backfill: every pre-existing row starts fully "unconsumed"
-            db.execute("UPDATE cost_entries SET remaining_miles = miles_acquired WHERE remaining_miles = 0")
-
-        # Idempotent migration: explicit conversion-rate snapshot on transfer links (Plan item A).
-        # This was always implicitly true (dest_miles/miles_consumed never changes after creation),
-        # but making it an explicit stored column means it survives even if that derivation logic
-        # ever changes, and gives the UI/audit trail a field to read directly.
-        link_cols = {r["name"] for r in db.execute("PRAGMA table_info(cost_transfer_links)").fetchall()}
-        if "conversion_rate" not in link_cols:
-            db.execute("ALTER TABLE cost_transfer_links ADD COLUMN conversion_rate REAL NOT NULL DEFAULT 0")
-            db.execute("""
-                UPDATE cost_transfer_links
-                SET conversion_rate = ROUND(1.0 * dest_miles / miles_consumed, 6)
-                WHERE miles_consumed > 0
-            """)
-        if "source_rate_label" not in link_cols:
-            db.execute("ALTER TABLE cost_transfer_links ADD COLUMN source_rate_label TEXT NOT NULL DEFAULT ''")
-
-        db.commit()
+# Run schema creation/migrations at import time (not just under
+# `python server.py`), so it also happens when this module is loaded by a
+# WSGI server (gunicorn, a serverless adapter, etc.). All CREATE TABLE /
+# ALTER TABLE migration logic now lives in db.py.
+init_db(app)
 
 # ── CORS (manual, no extra package needed) ───────────────────────────────────
 @app.after_request
@@ -260,7 +141,7 @@ def upsert_ffp(ffp_id):
     miles = int(body.get("miles", 0))
     exp   = str(body.get("expiry", "")).strip()
     notes = str(body.get("notes",  "")).strip()
-    now   = datetime.now().strftime("%-d %b %Y")
+    now   = _format_date(datetime.now())
 
     db = get_db()
     old = db.execute("SELECT miles FROM ffp_balances WHERE id = ?", (ffp_id,)).fetchone()
@@ -305,7 +186,7 @@ def upsert_bank(bank_id):
     body   = request.get_json(force=True)
     points = int(body.get("points", 0))
     exp    = str(body.get("expiry", "")).strip()
-    now    = datetime.now().strftime("%-d %b %Y")
+    now    = _format_date(datetime.now())
 
     db = get_db()
     old = db.execute("SELECT points FROM bank_balances WHERE id = ?", (bank_id,)).fetchone()
@@ -780,7 +661,7 @@ def import_all():
     data  = request.get_json(force=True)
     reset = request.args.get("reset", "false").lower() == "true"
     db    = get_db()
-    now   = datetime.now().strftime("%-d %b %Y")
+    now   = _format_date(datetime.now())
     count = {"ffp": 0, "bank": 0, "redemptions": 0, "cost_entries": 0, "cost_transfer_links": 0}
 
     if reset:
@@ -816,9 +697,9 @@ def import_all():
     for row in data.get("redemptions", []):
         db.execute(
             "INSERT INTO redemptions "
-            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes,created_at) "
-            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes,:created_at)",
-            {k: row.get(k,"") for k in ["program_id","travel_date","cabin","route","origin","destination","via","airline","notes","created_at"]}
+            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes) "
+            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes)",
+            {k: row.get(k,"") for k in ["program_id","travel_date","cabin","route","origin","destination","via","airline","notes"]}
             | {"miles_used": int(row.get("miles_used",0)), "one_way": int(row.get("one_way",0)),
                "cash_value": float(row.get("cash_value",0) or 0), "taxes_fees": float(row.get("taxes_fees",0) or 0),
                "block_time_minutes": int(row.get("block_time_minutes",0) or 0)}
@@ -827,12 +708,12 @@ def import_all():
     for row in data.get("cost_entries", []):
         miles = int(row.get("miles_acquired",0) or 0)
         db.execute(
-            "INSERT INTO cost_entries (id,program_id,entry_date,source,miles_acquired,cost_sgd,notes,created_at,entry_type,remaining_miles) "
-            "VALUES (:id,:program_id,:entry_date,:source,:miles_acquired,:cost_sgd,:notes,:created_at,:entry_type,:remaining_miles) "
+            "INSERT INTO cost_entries (id,program_id,entry_date,source,miles_acquired,cost_sgd,notes,entry_type,remaining_miles) "
+            "VALUES (:id,:program_id,:entry_date,:source,:miles_acquired,:cost_sgd,:notes,:entry_type,:remaining_miles) "
             "ON CONFLICT(id) DO UPDATE SET program_id=excluded.program_id, entry_date=excluded.entry_date, "
             "source=excluded.source, miles_acquired=excluded.miles_acquired, cost_sgd=excluded.cost_sgd, "
             "notes=excluded.notes, entry_type=excluded.entry_type, remaining_miles=excluded.remaining_miles",
-            {k: row.get(k,"") for k in ["program_id","entry_date","source","notes","created_at"]}
+            {k: row.get(k,"") for k in ["program_id","entry_date","source","notes"]}
             | {"id": row.get("id"), "miles_acquired": miles, "cost_sgd": float(row.get("cost_sgd",0) or 0),
                "entry_type": row.get("entry_type") or "acquisition",
                "remaining_miles": int(row.get("remaining_miles", miles) or 0)}
@@ -874,7 +755,9 @@ def static_files(filename):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    init_db()
+    # init_db(app) already ran at import time (see above); safe/idempotent
+    # to call again here too, kept for clarity when running `python server.py`.
+    init_db(app)
     print(f"Miles & Points Tracker API running on http://localhost:{PORT}")
     print(f"  DB:     {DB_PATH}")
     print(f"  Static: {STATIC_DIR}")
