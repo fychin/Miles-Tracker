@@ -79,9 +79,12 @@ python server.py
    - Add the following:
      ```
      DATABASE_PROVIDER=turso
-     DATABASE_URL=libsql://your-db-name.turso.io
+     TURSO_DATABASE_URL=libsql://your-db-name.turso.io
      TURSO_AUTH_TOKEN=your-auth-token-here
      ```
+   > **Note:** Vercel's Turso integration sets `TURSO_DATABASE_URL` automatically.
+   > The app also accepts `DATABASE_URL` as an alias, so either variable works.
+   > See the [Environment Variables Reference](#environment-variables-reference) for details.
 
 5. **Redeploy** with environment variables:
    ```bash
@@ -94,9 +97,14 @@ python server.py
 |----------|-------------|----------|---------|
 | `DATABASE_PROVIDER` | Database driver: `sqlite`, `turso`, or `auto` | No | `auto` |
 | `DATABASE_URL` | Connection URL (libsql:// for Turso, or file path for SQLite) | No | `data/tracker.db` |
+| `TURSO_DATABASE_URL` | Alias for `DATABASE_URL`; preferred by Vercel's Turso integration. Used when `DATABASE_URL` is not set. | No | - |
 | `TURSO_AUTH_TOKEN` | Authentication token for Turso | Yes (for Turso) | - |
 | `FLASK_DEBUG` | Enable Flask debug mode | No | `0` |
 | `PORT` | Local development port | No | `3000` |
+
+> **Resolution order:** `DATABASE_URL` takes precedence over `TURSO_DATABASE_URL`.
+> If both are empty and `DATABASE_PROVIDER` is `auto`, the app defaults to local
+> SQLite (`data/tracker.db`).
 
 ## Testing Locally with Turso
 

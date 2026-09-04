@@ -8,6 +8,8 @@ __pycache__/
 
 # Database
 data/tracker.db
+data/tracker.db-shm
+data/tracker.db-wal
 
 # Cache
 data/airports_cache.json

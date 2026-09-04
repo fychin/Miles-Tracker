@@ -31,11 +31,18 @@ class DatabaseConfig:
         """Create DatabaseConfig from environment variables."""
         provider = os.environ.get("DATABASE_PROVIDER", "auto").lower()
         database_url = os.environ.get("DATABASE_URL", "")
+        turso_database_url = os.environ.get("TURSO_DATABASE_URL")
         auth_token = os.environ.get("TURSO_AUTH_TOKEN")
         
+        # If TURSO_DATABASE_URL is provided and no explicit DATABASE_URL, prefer TURSO URL
+        if not database_url and turso_database_url:
+            database_url = turso_database_url
+        
+        # Auto-detect provider if requested
         if provider == "auto":
-            # Auto-detect based on URL scheme
-            if database_url.startswith("libsql://") or database_url.startswith("turso://"):
+            # Inspect the URL (if any) to decide between sqlite and turso
+            url_to_inspect = database_url or ""
+            if url_to_inspect.startswith("libsql://") or url_to_inspect.startswith("turso://"):
                 provider = "turso"
             else:
                 provider = "sqlite"

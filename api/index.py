@@ -7,8 +7,11 @@ serverless platform. All API requests are routed through this handler.
 
 For Vercel deployment, set these environment variables:
     DATABASE_PROVIDER: "turso"
-    DATABASE_URL: "libsql://your-db.turso.io"
+    TURSO_DATABASE_URL: "libsql://your-db.turso.io"
     TURSO_AUTH_TOKEN: "your-auth-token"
+
+Note: TURSO_DATABASE_URL is preferred on Vercel (set automatically by the
+Turso integration). DATABASE_URL is also accepted as an alias.
 """
 
 import sys
