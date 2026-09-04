@@ -2,7 +2,7 @@
 """
 Vercel Serverless Function Entry Point
 
-This module wraps the Flask application for execution on Vercel's
+This module exposes the Flask application for execution on Vercel's
 serverless platform. All API requests are routed through this handler.
 
 For Vercel deployment, set these environment variables:
@@ -23,13 +23,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from server import app
 
 
-def handler(request):
+def handler(request, response=None):
     """
-    Vercel serverless function handler.
-    
+    Vercel serverless function handler using the Flask test client.
+
+    This delegates the full WSGI request/response cycle to Flask so that
+    routing, CORS, headers, and body handling all behave identically to
+    local development. The handler returns a dict-shaped response that
+    Vercel's Python runtime converts into an HTTP response.
+
     Args:
         request: Vercel request object with path, method, headers, body
-        
+        response: (unused) kept for API compatibility
+
     Returns:
         Dict with statusCode, headers, and body
     """
@@ -39,7 +45,7 @@ def handler(request):
         method = request.method
         headers = dict(request.headers)
         body = request.get_data()
-        
+
         # Make request to Flask app
         response = client.open(
             path,
@@ -47,7 +53,7 @@ def handler(request):
             headers=headers,
             data=body
         )
-        
+
         return {
             "statusCode": response.status_code,
             "headers": dict(response.headers),
