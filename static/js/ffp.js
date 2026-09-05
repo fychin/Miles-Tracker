@@ -1,6 +1,17 @@
 /* ── FFP tab ─────────────────────────────────────────────────── */
+let showZeroMiles = false;
+
 function renderFFP() {
   let html = '';
+  // Toggle to show/hide 0-mile programs
+  html += `<div class="toggle-row" style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+             <label class="toggle" title="Toggle to show 0-mile programs">
+               <input type="checkbox" id="show-zero-miles-toggle" ${showZeroMiles ? 'checked' : ''} onchange="toggleShowZeroMiles()">
+               <span class="toggle-slider"></span>
+             </label>
+             <span class="text-muted" style="font-size:12px;line-height:1.2;margin-left:6px;">Show programs with 0 miles</span>
+           </div>`;
+
   ALLIANCES.forEach(al => {
     const progs = FFP.filter(p => p.alliance === al);
     const a = AC[al];
@@ -9,6 +20,7 @@ function renderFFP() {
       const d = ST.ffp[p.id];
       const mi = d?.miles||0;
       const days = daysTo(d?.expiry);
+      if (!showZeroMiles && (mi||0) <= 0) return;
       html += `<div class="prog-card">
         <div class="prog-logo-wrap">${logoImg(p.logo, p.code, 44)}</div>
         <div class="prog-info">
@@ -32,6 +44,11 @@ function renderFFP() {
     });
   });
   document.getElementById('pane-ffp').innerHTML = html;
+}
+
+function toggleShowZeroMiles() {
+  showZeroMiles = !showZeroMiles;
+  renderFFP();
 }
 
 function editFFP(id) {

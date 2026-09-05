@@ -18,78 +18,78 @@ python server.py
 1. **Create a Turso account** at https://turso.tech
 
 2. **Install Turso CLI** (optional but recommended):
-   ```bash
-   curl -sSfL https://get.tur.so/install.sh | bash
-   ```
+```bash
+curl -sSfL https://get.tur.so/install.sh | bash
+```
 
 3. **Create a new database**:
-   ```bash
-   turso db create miles-tracker
-   ```
+```bash
+turso db create miles-tracker
+```
 
 4. **Get your database URL**:
-   ```bash
-   turso db show miles-tracker --url
-   # Output: libsql://your-db-name.turso.io
-   ```
+```bash
+turso db show miles-tracker --url
+# Output: libsql://your-db-name.turso.io
+```
 
 5. **Create an authentication token**:
-   ```bash
-   turso tokens create miles-tracker-token
-   # Save this token - you'll need it for Vercel
-   ```
+```bash
+turso tokens create miles-tracker-token
+# Save this token - you'll need it for Vercel
+```
 
 ## Step 2: Migrate Your Data
 
 1. **Export data from your local SQLite database**:
-   ```bash
-   # Make sure your local server is running
-   curl http://localhost:3000/api/export > miles-tracker-export.json
-   ```
+```bash
+# Make sure your local server is running
+curl http://localhost:3000/api/export > miles-tracker-export.json
+```
 
 2. **Deploy to Vercel first** (see Step 3) with temporary empty Turso DB
 
 3. **Import data to Turso**:
-   ```bash
-   curl -X POST \
-     -H "Content-Type: application/json" \
-     -d @miles-tracker-export.json \
-     "https://your-app.vercel.app/api/import?reset=true"
-   ```
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d @ miles-tracker-export.json \
+  "https://your-app.vercel.app/api/import?reset=true"
+```
 
 ## Step 3: Deploy to Vercel
 
 1. **Install Vercel CLI**:
-   ```bash
-   npm install -g vercel
-   ```
+```bash
+npm install -g vercel
+```
 
 2. **Login to Vercel**:
-   ```bash
-   vercel login
-   ```
+```bash
+vercel login
+```
 
 3. **Deploy**:
-   ```bash
-   vercel
-   ```
+```bash
+vercel
+```
 
 4. **Set environment variables** in Vercel Dashboard:
-   - Go to your project settings → Environment Variables
-   - Add the following:
-     ```
-     DATABASE_PROVIDER=turso
-     TURSO_DATABASE_URL=libsql://your-db-name.turso.io
-     TURSO_AUTH_TOKEN=your-auth-token-here
-     ```
-   > **Note:** Vercel's Turso integration sets `TURSO_DATABASE_URL` automatically.
-   > The app also accepts `DATABASE_URL` as an alias, so either variable works.
-   > See the [Environment Variables Reference](#environment-variables-reference) for details.
+- Go to your project settings → Environment Variables
+- Add the following:
+````
+DATABASE_PROVIDER=turso
+TURSO_DATABASE_URL=libsql://your-db-name.turso.io
+TURSO_AUTH_TOKEN=your-auth-token-here
+````
+> **Note:** Vercel's Turso integration sets `TURSO_DATABASE_URL` automatically.
+> The app also accepts `DATABASE_URL` as an alias, so either variable works.
+> See the [Environment Variables Reference](#environment-variables-reference) for details.
 
 5. **Redeploy** with environment variables:
-   ```bash
-   vercel --prod
-   ```
+```
+vercel --prod
+```
 
 ## Environment Variables Reference
 
@@ -100,7 +100,7 @@ python server.py
 | `TURSO_DATABASE_URL` | Alias for `DATABASE_URL`; preferred by Vercel's Turso integration. Used when `DATABASE_URL` is not set. | No | - |
 | `TURSO_AUTH_TOKEN` | Authentication token for Turso | Yes (for Turso) | - |
 | `FLASK_DEBUG` | Enable Flask debug mode | No | `0` |
-| `PORT` | Local development port | No | `3000` |
+| | `PORT` | Local development port | No | `3000` |
 
 > **Resolution order:** `DATABASE_URL` takes precedence over `TURSO_DATABASE_URL`.
 > If both are empty and `DATABASE_PROVIDER` is `auto`, the app defaults to local
@@ -130,7 +130,7 @@ miles-tracker/
 ├── db.py                 # Database access layer
 ├── server.py             # Flask application
 ├── vercel.json           # Vercel configuration
-└── requirements.txt      # Python dependencies
+├── requirements.txt      # Python dependencies
 ```
 
 ## Troubleshooting
