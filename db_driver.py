@@ -73,6 +73,13 @@ class SQLiteCursorWrapper(CursorLike):
     def fetchone(self) -> Optional[sqlite3.Row]:
         return self._cursor.fetchone()
 
+    @property
+    def lastrowid(self) -> Optional[int]:
+        """Row id of the last INSERT on this cursor — needed by every
+        create-* endpoint in server.py that does `cur = db.execute(...)`
+        then reads `cur.lastrowid` to fetch back the row it just inserted."""
+        return self._cursor.lastrowid
+
 
 class SQLiteAdapter(ConnectionLike):
     """
@@ -129,6 +136,14 @@ class TursoCursorWrapper(CursorLike):
             return row
         except (IndexError, TypeError):
             return None
+
+    @property
+    def lastrowid(self) -> Optional[int]:
+        """The `libsql` package mirrors sqlite3's DB-API, so the object
+        returned by conn.execute() is itself a cursor exposing .lastrowid —
+        forward it. Falls back to None rather than raising if a future
+        libsql version doesn't expose it, since not every caller needs it."""
+        return getattr(self._rows, "lastrowid", None)
 
 
 class TursoAdapter(ConnectionLike):

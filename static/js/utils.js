@@ -62,6 +62,32 @@ function fmtBlockTime(mins) {
 const mpp = p => p.tm / p.fp;
 const fmt = n => Math.round(n||0).toLocaleString('en-SG');
 
+// Cost-basis unit helpers: cost_entries.miles_acquired holds RAW units of
+// whatever currency that program tracks — actual miles for an FFP, but
+// POINTS for a bank program (points and miles are not 1:1; e.g. DBS is
+// 5,000 pts → 10,000 mi, a 2x rate). Any $/unit figure for a bank program is
+// therefore $/point, not $/mile, and must never be compared directly against
+// a ¢/mile benchmark (ideal valuation, cross-program ranking) without first
+// converting through that program's own rate.
+function isBankProgram(progId) {
+  return !!BANK.find(b => b.id === progId);
+}
+// Converts a native cents-per-unit figure (¢/pt for bank, already ¢/mi for
+// FFP) into a cents-per-mile-EQUIVALENT figure, using the program's current
+// published conversion rate. This is only ever an estimate for points that
+// haven't been transferred yet — the real, locked-in rate is whatever gets
+// snapshotted at actual transfer time (see cost_transfer_links.conversion_rate).
+function milesEquivCpm(progId, nativeCpm) {
+  const bankProg = BANK.find(b => b.id === progId);
+  if (!bankProg) return nativeCpm; // already miles-denominated (FFP) or unknown
+  const rate = mpp(bankProg);
+  return rate > 0 ? nativeCpm / rate : 0;
+}
+// Short unit label for a program's native cost-basis figures.
+function costUnitLabel(progId) {
+  return isBankProgram(progId) ? '¢/pt' : '¢/mi';
+}
+
 // Accepts "56,500" or "56500" typed into a number-ish text input → 56500.
 function parseNum(v) {
   const n = parseFloat(String(v==null?'':v).replace(/,/g, ''));
@@ -156,11 +182,14 @@ function cabinOptions(sel) {
 function ffpOptions(sel) {
   return FFP.map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${p.name} (${p.code})</option>`).join('');
 }
+function bankOptions(sel) {
+  return BANK.map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${p.name}</option>`).join('');
+}
 
 function allProgOptions(sel) {
-  let html = `<optgroup label="Frequent Flyer Programs">`;
+  let html = `<optgroup label="Frequent Flyer Programs — miles credited here directly (organic flying, buy-miles promos, co-branded cards)">`;
   html += FFP.map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${p.name} (${p.code})</option>`).join('');
-  html += `</optgroup><optgroup label="Bank Points">`;
+  html += `</optgroup><optgroup label="Bank Points — convert to an FFP later via Log Transfer">`;
   html += BANK.map(p => `<option value="${p.id}" ${sel===p.id?'selected':''}>${p.name}</option>`).join('');
   html += `</optgroup>`;
   return html;

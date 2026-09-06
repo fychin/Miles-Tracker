@@ -15,20 +15,43 @@ async function renderCostBasis() {
 
   const idealCpm = Number(ST.settings?.ideal_cpm) || 0;
   // Green when a rate is at/under your target valuation (good value), red when it exceeds it (expensive).
+  // IMPORTANT: this must always be fed a miles-EQUIVALENT cents figure, never a
+  // raw bank-points cents figure — ideal_cpm is defined in ¢/mile terms.
   const cpmCls = cpmCents => idealCpm > 0 && cpmCents > 0 ? (cpmCents <= idealCpm ? 'c-ok' : 'c-danger') : '';
 
-  const totalCost  = Object.values(basisMap).reduce((s,b) => s + (b.total_cost||0), 0);
-  const totalMiles = Object.values(basisMap).reduce((s,b) => s + (b.total_miles||0), 0);
-  const blendedCpm = totalMiles > 0 ? totalCost / totalMiles : 0;
+  // Aggregate on a common basis: dollars need no conversion, but "miles" do —
+  // a bank program's remaining_miles/total_miles are actually POINTS, so they
+  // must be converted through that program's rate before being summed
+  // alongside real FFP miles. Without this, summing e.g. 3,096 DBS points +
+  // 10,000 KrisFlyer miles into "13,096 mi/pts" would be meaningless.
+  const equivMiles = (progId, rawUnits) => {
+    const bankProg = BANK.find(b => b.id === progId);
+    if (!bankProg) return rawUnits;
+    const rate = mpp(bankProg);
+    return rate > 0 ? rawUnits * rate : 0;
+  };
+  let totalCost = 0, totalEquivMiles = 0, remainingCostSum = 0, remainingEquivMilesSum = 0;
+  Object.entries(basisMap).forEach(([progId, b]) => {
+    totalCost += b.total_cost || 0;
+    totalEquivMiles += equivMiles(progId, b.total_miles || 0);
+    remainingCostSum += b.remaining_cost || 0;
+    remainingEquivMilesSum += equivMiles(progId, b.remaining_miles || 0);
+  });
+  const blendedCpm = remainingEquivMilesSum > 0 ? (remainingCostSum / remainingEquivMilesSum) : 0;
   const progsCovered = Object.keys(basisMap).length;
-  const cheapest = Object.entries(basisMap).filter(([,b]) => b.cost_per_mile > 0).sort((a,b) => a[1].cost_per_mile - b[1].cost_per_mile)[0];
+  // Rank on miles-equivalent cost, not raw stored units, so a bank program's
+  // ¢/point rate isn't compared directly against an FFP's ¢/mile rate.
+  const cheapest = Object.entries(basisMap)
+    .map(([id, b]) => [id, b, milesEquivCpm(id, (b.cost_per_mile||0)*100)])
+    .filter(([,,equivCents]) => equivCents > 0)
+    .sort((a,b) => a[2] - b[2])[0];
 
   let listHtml = '';
   if (entries.length === 0) {
     listHtml = `<div class="empty-state">
       <div class="empty-state-icon">$</div>
       <div style="font-size:14px;font-weight:500;color:var(--sq-text-mid)">No cost entries logged yet</div>
-      <div style="font-size:12px;margin-top:6px">Log what you actually paid for miles — annual fees, spend requirements, cash top-ups, transfer costs — to see your real ¢/mile per program.</div>
+      <div style="font-size:12px;margin-top:6px">Log what you actually paid for miles or points — annual fees, spend requirements, cash top-ups, transfer costs — to see your real cost per program, in the correct unit (¢/mile for FFPs, ¢/point for bank programs).</div>
     </div>`;
   } else {
     // Group by program
@@ -46,40 +69,58 @@ async function renderCostBasis() {
       if (rows.length === 0) return; // whole program has nothing live to show under this filter
       anyProgramShown = true;
       const basis = basisMap[progId];
-      const pillCents = basis ? basis.cost_per_mile*100 : 0;
-      const pillCls = basis ? cpmCls(pillCents) : '';
+      const isBank = isBankProgram(progId);
+      const unitLabel = costUnitLabel(progId);
+      const nativePillCents = basis ? basis.cost_per_mile*100 : 0;
+      const equivPillCents = basis ? milesEquivCpm(progId, nativePillCents) : 0;
+      const pillCls = basis ? cpmCls(equivPillCents) : '';
       listHtml += `<div class="sec-hd" style="display:flex;align-items:center;gap:8px">
         <div style="width:20px;height:20px;border-radius:4px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;border:0.5px solid var(--sq-border)">${logoImg(progLogoUrl(progId), progId.slice(0,2).toUpperCase(), 20)}</div>
         ${progLabel(progId)}
-        ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}">${pillCents.toFixed(3)}¢/mi blended · ${fmt(basis.remaining_miles)} mi live</span>` : ''}
+        ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}" title="${isBank ? `Own rate: ${nativePillCents.toFixed(3)}${unitLabel} · ≈${equivPillCents.toFixed(3)}¢/mi equivalent at today's published conversion rate — the exact rate only locks in once you actually transfer.` : ''}">${nativePillCents.toFixed(3)}${unitLabel}${isBank ? ` blended <span class="text-muted">(≈${equivPillCents.toFixed(3)}¢/mi)</span>` : ' blended'} · ${fmt(basis.remaining_miles)} ${isBank?'pts':'mi'} live</span>` : ''}
         <div class="sec-hd-line"></div>
       </div>
-      <div class="card mb-16"><table class="tbl">
-        <thead><tr><th>Date</th><th>Type</th><th>Source</th><th style="text-align:right">Miles/pts</th><th style="text-align:right">Cost (S$)</th><th style="text-align:right">¢/mi</th><th>Notes</th><th></th></tr></thead>
+      <div class="card mb-16"><table class="tbl" style="table-layout:fixed">
+        <thead><tr>
+          <th style="width:8%">Date</th>
+          <th style="width:10%">Type</th>
+          <th style="width:${isBank ? 25 : 14}%">Source</th>
+          <th style="width:7%;text-align:right">Miles/pts</th>
+          <th style="width:7%;text-align:right">Cost (S$)</th>
+          <th style="width:${isBank ? 9 : 9}%;text-align:right">¢/mi</th>
+          <th style="width:${isBank ? 19 : 30}%">Notes</th>
+          <th style="width:${isBank ? 10 : 15}%;text-align:right"></th>
+        </tr></thead>
         <tbody>
           ${rows.map(e => {
-            const cpm = e.miles_acquired > 0 ? (e.cost_sgd / e.miles_acquired * 100) : 0;
+            const nativeCpm = e.miles_acquired > 0 ? (e.cost_sgd / e.miles_acquired * 100) : 0;
+            const equivCpm  = milesEquivCpm(progId, nativeCpm);
             const dt = e.entry_date ? new Date(e.entry_date+'T00:00:00').toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'}) : '—';
             const consumed = e.miles_acquired - e.remaining_miles;
             const isXfer = e.entry_type === 'transfer';
             const typePill = isXfer ? `<span class="entry-type-pill xfer">Transfer</span>` : `<span class="entry-type-pill acq">Acquisition</span>`;
-            const statusNote = consumed > 0
-              ? `<div class="entry-type-pill consumed" style="margin-top:3px;display:inline-block">${fmt(consumed)}mi transferred out</div>`
-              : '';
+            const isFullyConsumed = e.remaining_miles <= 0 && consumed > 0;
+            const isPartiallyConsumed = e.remaining_miles > 0 && consumed > 0;
+            let statusBadge = '';
+            if (isFullyConsumed) {
+              statusBadge = `<span title="${fmt(consumed)}${isBank?' pts':' mi'} fully transferred to another program" style="font-size:9px;font-weight:600;padding:1px 7px;border-radius:4px;background:rgba(153,28,28,.08);color:var(--sq-danger);margin-left:8px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;vertical-align:middle">Transferred</span>`;
+            } else if (isPartiallyConsumed) {
+              statusBadge = `<span title="${fmt(consumed)}${isBank?' pts':' mi'} transferred · ${fmt(e.remaining_miles)}${isBank?' pts':' mi'} remaining" style="font-size:9px;font-weight:600;padding:1px 7px;border-radius:4px;background:rgba(191,155,48,.1);color:#8a6d1a;margin-left:8px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;vertical-align:middle">Transferred (partial)</span>`;
+            }
             const actions = isXfer
               ? `<button class="btn btn-sm" onclick="viewCostTransfer(${e.id})">Breakdown</button>
                  <button class="btn btn-sm" style="color:var(--sq-danger);border-color:rgba(153,28,28,.3)" onclick="deleteCostTransfer(${e.id})">Undo</button>`
               : `<button class="btn btn-sm" onclick="editCostEntry(${e.id})">Edit</button>
                  <button class="btn btn-sm" style="color:var(--sq-danger);border-color:rgba(153,28,28,.3)" onclick="deleteCostEntry(${e.id})">Del</button>`;
             return `<tr>
-              <td class="text-sm text-muted">${dt}</td>
+              <td class="text-sm text-muted" style="white-space:nowrap">${dt}</td>
               <td>${typePill}</td>
-              <td style="font-weight:500">${e.source||'—'}${statusNote}</td>
+              <td style="font-weight:500">${e.source||'—'}${statusBadge}</td>
               <td style="text-align:right" class="mono">${fmt(e.miles_acquired)}</td>
               <td style="text-align:right" class="mono">${e.cost_sgd.toFixed(2)}</td>
-              <td style="text-align:right;font-weight:${cpmCls(cpm)?'600':'400'}" class="mono ${cpmCls(cpm)}">${cpm.toFixed(3)}¢</td>
-              <td class="text-sm text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.notes||''}</td>
-              <td style="white-space:nowrap">${actions}</td>
+              <td style="text-align:right;font-weight:${cpmCls(equivCpm)?'600':'400'};position:relative;height:32px" class="mono ${cpmCls(equivCpm)}" title="${isBank ? `Raw cost: ${nativeCpm.toFixed(3)}¢/pt — ≈${equivCpm.toFixed(3)}¢/mi equivalent at today's rate` : ''}">${isBank ? `<span style="display:block;line-height:1.3">${equivCpm.toFixed(3)}¢/mi</span><span class="text-muted" style="display:block;font-size:8.5px;font-weight:400;line-height:1.3;opacity:.7;margin-top:1px">(${nativeCpm.toFixed(3)}¢/pt)</span>` : `${equivCpm.toFixed(3)}¢/mi`}</td>
+              <td class="text-sm text-muted notes-cell" title="${e.notes||''}">${e.notes||''}</td>
+              <td style="white-space:nowrap;text-align:right">${actions}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -99,12 +140,12 @@ async function renderCostBasis() {
       <div class="metric-card">
         <div class="metric-label">Blended cost / mile</div>
         <div class="metric-value gold" style="${cpmCls(blendedCpm*100)==='c-ok'?'color:#7fdb94':cpmCls(blendedCpm*100)==='c-danger'?'color:#f08080':''}">${blendedCpm > 0 ? (blendedCpm*100).toFixed(3)+'¢' : '—'}</div>
-        <div class="metric-sub" title="Each cost entry is a "lot" — miles/points you acquired at a known cost. When you transfer a lot elsewhere, it's removed from its original program's blend so it isn't counted twice. This number only reflects lots — or the still-unconsumed part of a lot — that haven't been transferred away.">Cost of what you still hold (transferred-out miles don't count here)</div>
+        <div class="metric-sub" title="Each cost entry is a &quot;lot&quot; — miles/points you acquired at a known cost. When you transfer a lot elsewhere, it's removed from its original program's blend so it isn't counted twice. This number only reflects lots — or the still-unconsumed part of a lot — that haven't been transferred away. Bank points are converted to a miles-equivalent at today's published rate so they can be blended alongside real FFP miles on a common basis.">Cost of what you still hold, in miles-equivalent</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Total spent acquiring</div>
         <div class="metric-value">$${fmt(totalCost)}</div>
-        <div class="metric-sub">${fmt(totalMiles)} mi/pts, all-time gross</div>
+        <div class="metric-sub" title="Bank points are converted to their miles-equivalent at today's rate so this total is on one consistent unit — see each program's row below for the raw ¢/pt figure.">≈${fmt(totalEquivMiles)} mi-equiv, all-time gross</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Programs tracked</div>
@@ -114,7 +155,7 @@ async function renderCostBasis() {
       <div class="metric-card">
         <div class="metric-label">Cheapest program</div>
         <div class="metric-value" style="font-size:16px">${cheapest ? progLookup(cheapest[0])?.code || progLabel(cheapest[0]) : '—'}</div>
-        <div class="metric-sub">${cheapest ? (cheapest[1].cost_per_mile*100).toFixed(3)+'¢/mi' : 'No data yet'}</div>
+        <div class="metric-sub" title="${cheapest && isBankProgram(cheapest[0]) ? 'Ranked on miles-equivalent cost, not raw ¢/point, so bank programs and FFPs compare fairly.' : ''}">${cheapest ? cheapest[2].toFixed(3)+'¢/mi equiv' : 'No data yet'}</div>
       </div>
     </div>
     <div class="card mb-16" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:.85rem 1rem">
@@ -128,14 +169,24 @@ async function renderCostBasis() {
       <button class="btn btn-sm" onclick="saveIdealCpm()">Save</button>
       <span class="text-muted text-sm" style="flex:1;min-width:180px">Cost-basis rates ≤ your target show <span class="c-ok" style="font-weight:600">green</span>; rates over it show <span class="c-danger" style="font-weight:600">red</span>.</span>
     </div>
-    <div class="help-note mb-16">
-      <strong>How cost basis works, in short:</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">
-        <li style="margin-bottom:4px"><strong>A "lot"</strong> = one cost entry, i.e. one specific batch of points/miles you got at a specific cost (e.g. one year's card fee, one tax payment).</li>
-        <li style="margin-bottom:4px"><strong>Log cost entry</strong> when money left your pocket and points/miles landed directly in an account — annual fees, minimum-spend bonuses, cash-buy promos, or a card-processing fee on a tax payment. Log it under whatever currency you actually received (e.g. "DBS Points", not "KrisFlyer" — even if you plan to transfer it out later).</li>
-        <li style="margin-bottom:4px"><strong>Log transfer</strong> when you move points/miles you've already logged into a different program (e.g. DBS Points → KrisFlyer). This carries the original cost forward with the miles and splits any transfer fee across the sources — it does <em>not</em> create new cost, so you avoid paying for the same dollar twice.</li>
-        <li>Once a lot is transferred out, its balance drops to 0 there and it stops counting toward that program's blended rate — the cost basis "moves" with the miles to the destination program.</li>
-      </ul>
+    <div id="help-panel-wrapper" style="margin-bottom:1rem">
+      <div id="help-toggle-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--sq-navy-light);border-radius:6px;cursor:pointer;border:0.5px solid var(--sq-border);user-select:none" onclick="toggleHelpPanel()" title="Toggle cost basis explanation">
+        <span id="help-chevron" style="display:inline-block;transition:transform 0.2s ease;font-size:12px;color:var(--sq-text-muted)">▼</span>
+        <span style="font-weight:500;font-size:13px">How cost basis works</span>
+        <span class="text-muted text-sm" style="flex:1;text-align:right" id="help-toggle-hint">(click to expand)</span>
+      </div>
+      <div id="help-panel-content" style="max-height:0;overflow:hidden;transition:max-height 0.25s ease,padding 0.25s ease">
+        <div class="help-note mb-16">
+          <ul style="margin:6px 0 0 18px;padding:0">
+            <li style="margin-bottom:4px"><strong>A "lot"</strong> = one cost entry, i.e. one specific batch of points/miles you got at a specific cost (e.g. one year's card fee, one tax payment).</li>
+            <li style="margin-bottom:4px"><strong>Log bank points</strong> when a bank card earned it — annual fee, min-spend bonus, a card's processing fee on a tax payment — even though you'll convert it to an FFP later via Log Transfer.</li>
+            <li style="margin-bottom:4px"><strong>Log miles</strong> when miles landed directly in an FFP with no bank in between — organic flying (cost $0), an airline's "buy miles" promo, or a co-branded card that credits miles straight to the FFP.</li>
+            <li style="margin-bottom:4px"><strong>Log transfer</strong> when you move points/miles you've already logged into a different program (e.g. DBS Points → KrisFlyer). This carries the original cost forward with the miles and splits any transfer fee across the sources — it does <em>not</em> create new cost, so you avoid paying for the same dollar twice.</li>
+            <li>Once a lot is transferred out, its balance drops to 0 there and it stops counting toward that program's blended rate — the cost basis "moves" with the miles to the destination program.</li>
+            <li style="margin-top:4px"><strong>Points ≠ miles.</strong> A bank program's rate is shown as ¢/pt, never ¢/mi — 3,096 DBS points at $82.91 is 2.678¢/pt, not 2.678¢/mi, since DBS converts at 2 miles per point. Rows for bank programs show a small "≈X¢/mi equivalent" alongside the raw ¢/pt figure, and that converted figure — not the raw one — is what's used for the green/red target-valuation coloring and the "cheapest program" ranking, so bank and FFP rates are never compared apples-to-oranges. The real, locked-in rate is only fixed once you actually run a transfer.</li>
+          </ul>
+        </div>
+      </div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -145,12 +196,57 @@ async function renderCostBasis() {
           <button class="btn btn-sm" style="${costBasisShowLiveOnly?'background:var(--sq-navy);color:#fff;':'background:transparent;border-color:transparent;'}" onclick="setCostBasisFilter(true)">Live only</button>
         </div>
       </div>
-      <div style="display:flex;gap:8px;flex-shrink:0">
-        <button class="btn" onclick="addCostEntry()">+ Log cost entry</button>
+      <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap">
+        <button class="btn" onclick="addBankPointsEntry()">+ Log bank points</button>
+        <button class="btn" onclick="addMilesEntry()">+ Log miles</button>
         <button class="btn btn-gold" onclick="addCostTransfer()">+ Log transfer</button>
       </div>
     </div>
     ${listHtml}`;
+  
+  // Initialize help panel collapsed/expanded state
+  setTimeout(initHelpPanel, 0);
+}
+
+function initHelpPanel() {
+  const wrapper = document.getElementById('help-panel-wrapper');
+  const content = document.getElementById('help-panel-content');
+  const chevron = document.getElementById('help-chevron');
+  const hint = document.getElementById('help-toggle-hint');
+  if (!wrapper || !content) return;
+  
+  const collapsed = localStorage.getItem('costbasis-help-collapsed') !== '0';
+  if (collapsed) {
+    content.style.maxHeight = '0px';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+    if (hint) hint.textContent = '(click to expand)';
+  } else {
+    content.style.maxHeight = content.scrollHeight + 'px';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (hint) hint.textContent = '(click to collapse)';
+  }
+}
+
+function toggleHelpPanel() {
+  const content = document.getElementById('help-panel-content');
+  const chevron = document.getElementById('help-chevron');
+  const hint = document.getElementById('help-toggle-hint');
+  if (!content) return;
+  
+  const currentMax = content.style.maxHeight;
+  if (currentMax === '0px' || !currentMax || currentMax === '0px') {
+    // Expanding
+    content.style.maxHeight = content.scrollHeight + 'px';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (hint) hint.textContent = '(click to collapse)';
+    localStorage.setItem('costbasis-help-collapsed', '0');
+  } else {
+    // Collapsing
+    content.style.maxHeight = '0px';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+    if (hint) hint.textContent = '(click to expand)';
+    localStorage.setItem('costbasis-help-collapsed', '1');
+  }
 }
 
 function setCostBasisFilter(liveOnly) {
@@ -168,14 +264,27 @@ async function saveIdealCpm() {
   } catch(e) { showToast('Save failed: '+e.message, 3500); }
 }
 
-function costEntryModal(data) {
+function costEntryModal(data, kind) {
   const d = data || {};
-  document.getElementById('modal-hd').innerHTML = d.id ? 'Edit Cost Entry' : 'Log Cost Entry';
+  // Editing always derives kind from the entry's actual program — never trust
+  // a passed-in kind for edits, so the modal can't show the wrong program list.
+  const isBank = d.id ? isBankProgram(d.program_id) : (kind === 'bank');
+  const unitWord = isBank ? 'points' : 'miles';
+  const kindLabel = isBank ? 'Bank Points' : 'Miles';
+  const kindNote = isBank
+    ? 'Bank points — you\'ll convert this to an FFP later via Log Transfer.'
+    : 'FFP miles, credited here directly — organic flying ($0 cost), a buy-miles promo, or a co-branded card. Not bank points you plan to transfer in.';
+  const sourcePlaceholder = isBank
+    ? 'e.g. DBS Altitude annual fee, min. spend bonus, tax-payment processing fee'
+    : 'e.g. Organic flying, KrisFlyer buy-miles promo, co-branded card credit';
+
+  document.getElementById('modal-hd').innerHTML = d.id ? `Edit ${kindLabel} Entry` : `Log ${kindLabel}`;
   document.getElementById('modal-body').innerHTML = `
+    <div class="help-note" style="font-size:11.5px;margin-bottom:12px">${kindNote}</div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Program</label>
-        <select class="select-input" id="e-progc"><option value="">Select…</option>${allProgOptions(d.program_id||'')}</select>
+        <label class="form-label">${isBank ? 'Bank program' : 'Frequent flyer program'}</label>
+        <select class="select-input" id="e-progc"><option value="">Select…</option>${isBank ? bankOptions(d.program_id||'') : ffpOptions(d.program_id||'')}</select>
       </div>
       <div class="form-group">
         <label class="form-label">Date</label>
@@ -184,11 +293,11 @@ function costEntryModal(data) {
     </div>
     <div class="form-group">
       <label class="form-label">Source</label>
-      <input class="form-input" type="text" id="e-source" value="${d.source||''}" placeholder="e.g. DBS Altitude annual fee, min. spend bonus, cash-buy promo">
+      <input class="form-input" type="text" id="e-source" value="${d.source||''}" placeholder="${sourcePlaceholder}">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Miles / points acquired</label>
+        <label class="form-label">${isBank ? 'Points' : 'Miles'} acquired</label>
         <input class="form-input num-input" type="text" inputmode="numeric" id="e-miles-acq" value="${fmt(d.miles_acquired||0)}"
           onfocus="if(parseNum(this.value)===0)this.value=''" onblur="if(this.value==='')this.value='0'">
       </div>
@@ -199,8 +308,8 @@ function costEntryModal(data) {
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label" style="color:var(--sq-text-muted)">Cost per mile preview</label>
-      <div class="ref-box" id="cost-preview">Enter miles and cost to see ¢/mile.</div>
+      <label class="form-label" style="color:var(--sq-text-muted)">Cost per ${isBank?'point':'mile'} preview</label>
+      <div class="ref-box" id="cost-preview">Pick a program, then enter ${unitWord} and cost.</div>
     </div>
     <div class="form-group">
       <label class="form-label">Notes</label>
@@ -208,16 +317,28 @@ function costEntryModal(data) {
     </div>`;
 
   function updateCostPreview() {
+    const progId = document.getElementById('e-progc').value;
     const miles = Math.max(0, Math.round(parseNum(document.getElementById('e-miles-acq').value)));
     const cost  = Math.max(0, parseNum(document.getElementById('e-cost').value));
     const box   = document.getElementById('cost-preview');
-    if (miles <= 0) { box.innerHTML = 'Enter miles and cost to see ¢/mile.'; return; }
+    if (miles <= 0) { box.innerHTML = `Pick a program, then enter ${unitWord} and cost.`; return; }
     const cpm = cost / miles * 100;
-    box.innerHTML = `$${cost.toFixed(2)} ÷ ${miles.toLocaleString()} mi/pts = <strong>${cpm.toFixed(3)}¢ per mile</strong>`;
+    if (!progId) {
+      box.innerHTML = `$${cost.toFixed(2)} ÷ ${miles.toLocaleString()} ${unitWord} = <strong>${cpm.toFixed(3)}¢</strong> — pick a program above.`;
+      return;
+    }
+    const unit = costUnitLabel(progId);
+    let html = `$${cost.toFixed(2)} ÷ ${miles.toLocaleString()} ${isBank?'pts':'mi'} = <strong>${cpm.toFixed(3)}${unit}</strong>`;
+    if (isBank) {
+      const equiv = milesEquivCpm(progId, cpm);
+      html += ` <span class="text-muted">(≈${equiv.toFixed(3)}¢/mi equivalent once converted to an FFP at today's rate)</span>`;
+    }
+    box.innerHTML = html;
   }
   setTimeout(() => {
-    ['e-miles-acq','e-cost'].forEach(id => {
+    ['e-progc','e-miles-acq','e-cost'].forEach(id => {
       document.getElementById(id).addEventListener('input', updateCostPreview);
+      document.getElementById(id).addEventListener('change', updateCostPreview);
     });
     updateCostPreview();
   }, 0);
@@ -240,7 +361,7 @@ function costEntryModal(data) {
         showToast('Cost entry updated ✓');
       } else {
         await apiFetch('/api/cost-entries', {method:'POST', body:JSON.stringify(payload)});
-        showToast('Cost entry logged ✓');
+        showToast(`${kindLabel} entry logged ✓`);
       }
       closeModal();
       renderCostBasis();
@@ -250,13 +371,14 @@ function costEntryModal(data) {
   openModal();
 }
 
-function addCostEntry() { costEntryModal(null); }
+function addBankPointsEntry() { costEntryModal(null, 'bank'); }
+function addMilesEntry() { costEntryModal(null, 'ffp'); }
 
 async function editCostEntry(id) {
   try {
     const rows = await apiFetch('/api/cost-entries');
     const row = rows.find(r => r.id === id);
-    if (row) costEntryModal(row);
+    if (row) costEntryModal(row, isBankProgram(row.program_id) ? 'bank' : 'ffp');
   } catch(e) { showToast('Error loading cost entry', 3000); }
 }
 
@@ -311,7 +433,7 @@ async function transferModal() {
       <input type="checkbox" id="lot-chk-${e.id}" onchange="onLotToggle(${e.id})">
       <div class="lot-info">
         <div style="font-weight:500">${p ? progLabel(e.program_id) : e.program_id}</div>
-        <div class="text-muted">${e.source||'—'} · ${fmt(e.remaining_miles)} mi/pts available · ${ownCpm.toFixed(3)}¢/mi own cost</div>
+        <div class="text-muted">${e.source||'—'} · ${fmt(e.remaining_miles)} pts available · ${ownCpm.toFixed(3)}¢/pt own cost</div>
         ${driftNote}
       </div>
       <div class="lot-inputs">
