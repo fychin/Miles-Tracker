@@ -48,10 +48,17 @@ async function renderCostBasis() {
     .filter(([,,equivCents]) => equivCents > 0)
     .sort((a,b) => a[2] - b[2]);
   const cheapest = rankedByCpm[0];
-  // Most expensive: the mirror of "cheapest" — flags whichever currency is
-  // quietly costing the most per mile, so it's worth a second look (maybe
-  // that card isn't earning its keep, or a promo rate has drifted).
-  const mostExpensive = rankedByCpm.length > 0 ? rankedByCpm[rankedByCpm.length-1] : null;
+  // Acquisition spend: money paid directly to acquire points/miles — annual
+  // fees, min-spend bonuses, cash-buy promos, tax-processing fees — summed
+  // straight from 'acquisition' entries only. Deliberately excludes transfer
+  // entries' cost, since that figure is inherited acquisition cost PLUS a
+  // transfer fee already counted once at the acquisition entry; including it
+  // again here would double-count the same dollars, and the fee itself is a
+  // cost of moving currency, not of acquiring it in the first place.
+  const acquisitionSpend = entries
+    .filter(e => e.entry_type === 'acquisition')
+    .reduce((s, e) => s + (e.cost_sgd||0), 0);
+  const acquisitionCount = entries.filter(e => e.entry_type === 'acquisition' && e.cost_sgd > 0).length;
 
   let listHtml = '';
   if (entries.length === 0) {
@@ -99,6 +106,7 @@ async function renderCostBasis() {
         <div style="width:20px;height:20px;border-radius:4px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;border:0.5px solid var(--sq-border)">${logoImg(progLogoUrl(progId), progId.slice(0,2).toUpperCase(), 20)}</div>
         ${progLabel(progId)}
         ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}" title="${isBank ? `Own rate: ${nativePillCents.toFixed(3)}${unitLabel} · ≈${equivPillCents.toFixed(3)}¢/mi equivalent at today's published conversion rate — the exact rate only locks in once you actually transfer.` : ''}">${nativePillCents.toFixed(3)}${unitLabel}${isBank ? ` blended <span class="text-muted">(≈${equivPillCents.toFixed(3)}¢/mi)</span>` : ' blended'} · ${fmt(basis.remaining_miles)} ${isBank?'pts':'mi'} live</span>` : ''}
+        ${!isBank && basis ? `<span class="basis-pill none" title="All-time totals for this FFP — includes miles later redeemed or that expired, not just what's currently live.">$${fmt(basis.total_cost)} spent · ${fmt(basis.total_miles)} mi acquired (all-time)</span>` : ''}
         <div class="sec-hd-line"></div>
       </div>
       <div class="card mb-16"><div class="table-scroll"><table class="tbl">
@@ -189,9 +197,9 @@ async function renderCostBasis() {
         <div class="metric-sub" title="Bank points are converted to their miles-equivalent at today's rate so this total is on one consistent unit — see each program's row below for the raw ¢/pt figure.">≈${fmt(totalEquivMiles)} mi-equiv, all-time gross</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Most expensive program</div>
-        <div class="metric-value" style="font-size:16px">${mostExpensive ? progLookup(mostExpensive[0])?.code || progLabel(mostExpensive[0]) : '—'}</div>
-        <div class="metric-sub" title="${mostExpensive ? 'Ranked on miles-equivalent cost, so bank programs (converted from ¢/pt) and FFPs compare fairly.' : ''}">${mostExpensive ? mostExpensive[2].toFixed(3)+'¢/mi equiv' : 'No data yet'}</div>
+        <div class="metric-label">Spent to acquire miles/pts</div>
+        <div class="metric-value">$${fmt(acquisitionSpend)}</div>
+        <div class="metric-sub" title="Sum of 'acquisition' entries only — annual fees, min-spend bonuses, cash-buy promos, tax-processing fees. Excludes transfer fees, and excludes double-counting a transfer's inherited cost, since that's the same dollars already counted here at the point of acquisition.">Across ${acquisitionCount} acquisition${acquisitionCount!==1?'s':''} (excl. transfer fees)</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Cheapest program</div>
