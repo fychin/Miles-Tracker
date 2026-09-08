@@ -2,7 +2,7 @@
 let activePane = 'dashboard';
 
 function gotoTab(t) {
-  const TABS = ['dashboard','ffp','bank','activity','redemptions','costbasis','settings'];
+  const TABS = ['dashboard','ffp','bank','redemptions','costbasis','activity','settings'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', TABS[i] === t));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('pane-' + t).classList.add('active');

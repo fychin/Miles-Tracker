@@ -53,6 +53,15 @@ a{color:inherit;text-decoration:none}
 .sec-hd{font-size:10px;font-weight:600;color:var(--sq-navy);text-transform:uppercase;letter-spacing:.09em;margin:1.25rem 0 10px;display:flex;align-items:center;gap:8px}
 .sec-hd:first-child{margin-top:0}
 .sec-hd-line{flex:1;height:0.5px;background:var(--sq-border)}
+.cbg-hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:1.75rem 0 12px;padding-bottom:9px;border-bottom:2px solid var(--sq-navy)}
+.cbg-hd:first-child{margin-top:0}
+.cbg-title{font-size:15px;font-weight:700;color:var(--sq-navy)}
+.cbg-sub{font-size:11.5px;color:var(--sq-text-muted);font-weight:400}
+.cbg-badge{font-size:9.5px;font-weight:700;padding:2px 9px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.cbg-badge.bank{background:rgba(31,99,122,.1);color:#1f637a}
+.cbg-badge.ffp{background:rgba(46,112,91,.1);color:#2e705b}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table-scroll .tbl{min-width:720px}
 
 /* ── Alliance label ──────────────────────────────────────────── */
 .al-row{display:flex;align-items:center;gap:10px;margin:1.5rem 0 10px}

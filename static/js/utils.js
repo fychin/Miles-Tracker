@@ -137,6 +137,17 @@ function todayStr() {
   return new Date().toLocaleDateString('en-SG', {day:'numeric', month:'short', year:'numeric'});
 }
 
+// Local-date (not UTC) in YYYY-MM-DD, for defaulting <input type="date"> values.
+// IMPORTANT: never use `new Date().toISOString().slice(0,10)` for this — toISOString()
+// is always UTC, so anyone in a timezone ahead of UTC (e.g. Singapore, UTC+8) gets
+// silently defaulted to YESTERDAY's date for roughly the first 8 hours of every
+// local day. That's exactly the kind of "close enough to not notice" bug that
+// produces wrong transfer/entry dates if the user doesn't catch and correct it.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 function daysTo(s) {
   if (!s) return null;
   const a = new Date(s), b = new Date();

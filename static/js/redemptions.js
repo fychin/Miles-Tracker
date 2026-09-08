@@ -9,12 +9,25 @@ async function renderRedemptions() {
     pane.innerHTML = `<div class="api-banner"><span class="api-dot err"></span>Could not load. Is the server running?</div>`;
     return;
   }
-  const totalMi  = rows.reduce((s,r) => s + (r.miles_used||0), 0);
+  const totalMi  = rows.reduce((s,r) => s + (r.miles_used||0) * (r.pax||1), 0);
   const totalBlockMinutes = rows.reduce((s,r) => s + (r.block_time_minutes||0), 0);
   const avgMiPerMin = totalBlockMinutes > 0 ? (totalMi / totalBlockMinutes) : null;
-  const premiums  = rows.filter(r => r.cabin==='F'||r.cabin==='J').length;
+  // Broken down per cabin (F/J/W/Y) rather than one flat number — a single
+  // "premium cabin count" or "avg mi/min" hides how differently each cabin
+  // actually performs, and mixes seat count (a quantity) with efficiency
+  // (a rate) into one misleading figure.
+  const cabinStats = {};
+  CABINS.forEach(c => { cabinStats[c.id] = {seats: 0, redemptions: 0, miSum: 0, minSum: 0}; });
+  rows.forEach(r => {
+    const stat = cabinStats[r.cabin];
+    if (!stat) return;
+    stat.seats += (r.pax||1);
+    stat.redemptions += 1;
+    if (r.block_time_minutes > 0) { stat.miSum += r.miles_used; stat.minSum += r.block_time_minutes; }
+  });
+  const premiumSeats = (cabinStats['F']?.seats||0) + (cabinStats['J']?.seats||0);
   const topProg  = (() => {
-    const cnt = {}; rows.forEach(r => { cnt[r.program_id]=(cnt[r.program_id]||0)+r.miles_used; });
+    const cnt = {}; rows.forEach(r => { cnt[r.program_id]=(cnt[r.program_id]||0)+(r.miles_used||0)*(r.pax||1); });
     const best = Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
     if (!best) return '—';
     const p = FFP.find(x=>x.id===best[0]);
@@ -52,24 +65,28 @@ async function renderRedemptions() {
         const tripTypeLabel = r.one_way
           ? '<span class="trip-badge trip-ow">One-way</span>'
           : '<span class="trip-badge trip-rt">Round-trip</span>';
+        const pax = r.pax || 1;
+        const seatsBadge = pax > 1 ? `<span class="trip-badge" style="background:var(--sq-navy-light);color:var(--sq-text-mid)">×${pax} seats</span>` : '';
         const blockTimeLabel = fmtBlockTime(r.block_time_minutes);
-        const mpm = r.block_time_minutes > 0 ? (r.miles_used / r.block_time_minutes) : null;
+        const mpm = r.block_time_minutes > 0 ? (r.miles_used / r.block_time_minutes) : null; // per-seat efficiency, unaffected by pax
         const basis = ST.costBasis[r.program_id];
         const cpm = basis && basis.cost_per_mile > 0 ? basis.cost_per_mile : null;
-        const milesCost = cpm !== null ? r.miles_used * cpm : null;
-        const totalSpent = milesCost !== null ? milesCost + (r.taxes_fees||0) : null;
-        const savings = (totalSpent !== null && r.cash_value > 0) ? r.cash_value - totalSpent : null;
+        const milesCostPerSeat = cpm !== null ? r.miles_used * cpm : null;
+        const totalSpentPerSeat = milesCostPerSeat !== null ? milesCostPerSeat + (r.taxes_fees||0) : null;
+        const groupTotalSpent = totalSpentPerSeat !== null ? totalSpentPerSeat * pax : null;
+        const groupCashValue = (r.cash_value||0) * pax;
+        const savings = (groupTotalSpent !== null && groupCashValue > 0) ? groupCashValue - groupTotalSpent : null;
         let valueLine = '';
         if (r.cash_value > 0) {
           if (savings !== null) {
-            const pct = r.cash_value > 0 ? (savings / r.cash_value * 100) : 0;
+            const pct = groupCashValue > 0 ? (savings / groupCashValue * 100) : 0;
             const savCls = savings >= 0 ? 'c-ok' : 'c-danger';
             valueLine = `<div class="rdp-meta">
               <span class="${savCls}" style="font-weight:600">${savings>=0?'Saved':'Lost'} $${fmt(Math.abs(savings))}</span>
-              <span>vs cash $${fmt(r.cash_value)} (${pct.toFixed(0)}% ${savings>=0?'off':'over'})</span>
+              <span>vs cash $${fmt(groupCashValue)}${pax>1?` (${pax} seats)`:''} (${pct.toFixed(0)}% ${savings>=0?'off':'over'})</span>
             </div>`;
           } else {
-            valueLine = `<div class="rdp-meta"><span style="color:var(--sq-text-muted)">Cash price $${fmt(r.cash_value)} · add cost-basis entries for ${prog?.name||r.program_id} to see savings</span></div>`;
+            valueLine = `<div class="rdp-meta"><span style="color:var(--sq-text-muted)">Cash price $${fmt(groupCashValue)}${pax>1?` (${pax} seats)`:''} · add cost-basis entries for ${prog?.name||r.program_id} to see savings</span></div>`;
           }
         }
         listHtml += `<div class="rdp-card">
@@ -78,9 +95,10 @@ async function renderRedemptions() {
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <div class="rdp-route">${routeDisplay}</div>
               ${tripTypeLabel}
+              ${seatsBadge}
               ${cabinBadge(r.cabin)}
             </div>
-            <div class="rdp-meta" title="${mpm !== null ? 'Miles used ÷ scheduled block (gate-to-gate) minutes for this flight — a rough way to compare miles \'spent per minute of flying\' across redemptions of different lengths and cabins. Higher isn\'t automatically worse: a long-haul First seat will show a high mi/min next to a short Economy hop, since both the miles and the minutes scale together.' : ''}">
+            <div class="rdp-meta" title="${mpm !== null ? 'Miles used ÷ scheduled block (gate-to-gate) minutes for this flight — a rough way to compare miles \'spent per minute of flying\' across redemptions of different lengths and cabins. Per seat — unaffected by how many seats were booked. Higher isn\'t automatically worse: a long-haul First seat will show a high mi/min next to a short Economy hop, since both the miles and the minutes scale together.' : ''}">
               ${blockTimeLabel ? `<span class="block-time-pill">✈ ${blockTimeLabel}</span>` : ''}
               ${mpm !== null ? `<span class="mpm-pill">${mpm.toFixed(2)} mi/min</span>` : ''}
               ${dtLabel ? `<span>${dtLabel}</span>` : ''}
@@ -90,9 +108,10 @@ async function renderRedemptions() {
             ${valueLine}
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-            <div class="rdp-miles">${fmt(r.miles_used)} <span style="font-size:11px;font-weight:400;color:var(--sq-text-muted)">mi</span></div>
+            <div class="rdp-miles">${fmt(r.miles_used)} <span style="font-size:11px;font-weight:400;color:var(--sq-text-muted)">mi${pax>1?'/seat':''}</span></div>
+            ${pax > 1 ? `<div style="font-size:10px;color:var(--sq-text-muted)">${fmt(r.miles_used*pax)} mi total</div>` : ''}
             <div class="rdp-prog">${prog?.name||r.program_id}</div>
-            ${cpm !== null ? `<div style="font-size:10px;color:var(--sq-text-muted)">≈$${fmt(totalSpent)} cost</div>` : ''}
+            ${cpm !== null ? `<div style="font-size:10px;color:var(--sq-text-muted)">≈$${fmt(groupTotalSpent)} cost${pax>1?' total':''}</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;gap:5px;margin-left:4px">
             <button class="btn btn-sm" onclick="editRedemption(${r.id})">Edit</button>
@@ -113,13 +132,21 @@ async function renderRedemptions() {
       </div>
       <div class="metric-card">
         <div class="metric-label">Premium cabin</div>
-        <div class="metric-value">${premiums}</div>
-        <div class="metric-sub">F / J redemption${premiums!==1?'s':''}</div>
+        <div class="metric-value">${premiumSeats}</div>
+        <div class="metric-sub" style="display:flex;gap:8px;flex-wrap:wrap">
+          ${['F','J','W'].map(c => cabinStats[c]?.seats > 0 ? `<span><span class="cabin-badge cabin-${c}" style="padding:1px 5px;font-size:8.5px">${c}</span> ${cabinStats[c].seats}</span>` : '').filter(Boolean).join('') || 'No F/J/W seats yet'}
+        </div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Avg miles / min</div>
         <div class="metric-value">${avgMiPerMin !== null ? avgMiPerMin.toFixed(2) : '—'}</div>
-        <div class="metric-sub">Miles spent per minute flown, across all redemptions</div>
+        <div class="metric-sub" style="display:flex;gap:8px;flex-wrap:wrap" title="Per-cabin average of miles used ÷ block minutes — a rate, not affected by how many seats you booked on a redemption.">
+          ${CABINS.map(c => {
+            const s = cabinStats[c.id];
+            if (!s || s.minSum <= 0) return '';
+            return `<span><span class="cabin-badge cabin-${c.id}" style="padding:1px 5px;font-size:8.5px">${c.id}</span> ${(s.miSum/s.minSum).toFixed(2)}</span>`;
+          }).filter(Boolean).join('') || 'No block time logged yet'}
+        </div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Top program</div>
@@ -222,14 +249,18 @@ function redemptionModal(data) {
         <select class="select-input" id="e-cabin">${cabinOptions(d.cabin||'J')}</select>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row-3">
       <div class="form-group">
-        <label class="form-label">Miles used</label>
+        <label class="form-label">Miles used <span style="font-weight:400;color:var(--sq-text-muted)">(per seat)</span></label>
         <input class="form-input num-input" type="text" inputmode="numeric" id="e-miles" value="${fmt(d.miles_used||0)}"
           onfocus="if(parseNum(this.value)===0)this.value=''" onblur="if(this.value==='')this.value='0'">
       </div>
       <div class="form-group">
-        <label class="form-label">Operating airline <span style="font-weight:400;color:var(--sq-text-muted)">(if different)</span></label>
+        <label class="form-label">Seats <span style="font-weight:400;color:var(--sq-text-muted)">(same rate each)</span></label>
+        <input class="form-input" type="number" id="e-pax" value="${d.pax||1}" min="1" max="20" step="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Operating airline</label>
         <input class="form-input" type="text" id="e-airline" value="${d.airline||''}" placeholder="e.g. Lufthansa">
       </div>
     </div>
@@ -255,12 +286,12 @@ function redemptionModal(data) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label" style="min-height:32px;display:block">Cash price if paid cash<br><span style="font-weight:400;color:var(--sq-text-muted)">(S$, optional)</span></label>
+        <label class="form-label" style="min-height:32px;display:block">Cash price if paid cash<br><span style="font-weight:400;color:var(--sq-text-muted)">(S$ per seat, optional)</span></label>
         <input class="form-input num-input" data-decimal="true" type="text" inputmode="decimal" id="e-cashvalue" value="${fmt(d.cash_value||0)}"
           onfocus="if(parseNum(this.value)===0)this.value=''" onblur="if(this.value==='')this.value='0'">
       </div>
       <div class="form-group">
-        <label class="form-label" style="min-height:32px;display:block">Taxes & fees paid<br><span style="font-weight:400;color:var(--sq-text-muted)">(S$)</span></label>
+        <label class="form-label" style="min-height:32px;display:block">Taxes & fees paid<br><span style="font-weight:400;color:var(--sq-text-muted)">(S$ per seat)</span></label>
         <input class="form-input num-input" data-decimal="true" type="text" inputmode="decimal" id="e-taxes" value="${fmt(d.taxes_fees||0)}"
           onfocus="if(parseNum(this.value)===0)this.value=''" onblur="if(this.value==='')this.value='0'">
       </div>
@@ -275,6 +306,7 @@ function redemptionModal(data) {
     const miles   = Math.max(0, Math.round(parseNum(document.getElementById('e-miles').value)));
     const cashVal = Math.max(0, parseNum(document.getElementById('e-cashvalue').value));
     const taxes   = Math.max(0, parseNum(document.getElementById('e-taxes').value));
+    const pax     = Math.max(1, parseInt(document.getElementById('e-pax').value)||1);
     const basis   = ST.costBasis[progId];
     const box     = document.getElementById('rdp-value-preview');
     if (!progId) { box.innerHTML = 'Select a program to see cost-basis value.'; return; }
@@ -283,12 +315,20 @@ function redemptionModal(data) {
       return;
     }
     const milesCost  = miles * basis.cost_per_mile;
-    const totalSpent = milesCost + taxes;
-    box.innerHTML = `Miles cost ≈ $${fmt(milesCost)} <span style="color:var(--sq-text-muted)">(${miles.toLocaleString()}mi × ${(basis.cost_per_mile*100).toFixed(3)}¢)</span> + $${fmt(taxes)} taxes = <strong>$${fmt(totalSpent)}</strong> out-of-pocket`
-      + (cashVal > 0 ? `<br><span style="color:${cashVal-totalSpent>=0?'var(--sq-ok)':'var(--sq-danger)'};font-weight:600">${cashVal-totalSpent>=0?'Saved':'Lost'} $${fmt(Math.abs(cashVal-totalSpent))}</span> vs $${fmt(cashVal)} cash price` : '');
+    const totalSpent = milesCost + taxes; // per-seat
+    const paxNote = pax > 1 ? ` <span class="text-muted">× ${pax} seats</span>` : '';
+    let html = `Per seat: miles cost ≈ $${fmt(milesCost)} <span style="color:var(--sq-text-muted)">(${miles.toLocaleString()}mi × ${(basis.cost_per_mile*100).toFixed(3)}¢)</span> + $${fmt(taxes)} taxes = <strong>$${fmt(totalSpent)}</strong>${paxNote}`;
+    if (pax > 1) {
+      html += `<br>Group total (${pax} seats): <strong>$${fmt(totalSpent*pax)}</strong> out-of-pocket`;
+    }
+    if (cashVal > 0) {
+      const groupSavings = (cashVal - totalSpent) * pax;
+      html += `<br><span style="color:${groupSavings>=0?'var(--sq-ok)':'var(--sq-danger)'};font-weight:600">${groupSavings>=0?'Saved':'Lost'} $${fmt(Math.abs(groupSavings))}</span> vs $${fmt(cashVal*pax)} cash price${pax>1?' for all seats':''}`;
+    }
+    box.innerHTML = html;
   }
   setTimeout(() => {
-    ['e-prog','e-miles','e-cashvalue','e-taxes'].forEach(id => {
+    ['e-prog','e-miles','e-cashvalue','e-taxes','e-pax'].forEach(id => {
       document.getElementById(id).addEventListener('input', updateValuePreview);
       document.getElementById(id).addEventListener('change', updateValuePreview);
     });
@@ -329,6 +369,7 @@ function redemptionModal(data) {
         cash_value:  Math.max(0, parseNum(document.getElementById('e-cashvalue').value)),
         taxes_fees:  Math.max(0, parseNum(document.getElementById('e-taxes').value)),
         block_time_minutes: btHours*60 + btMins,
+        pax: Math.max(1, parseInt(document.getElementById('e-pax').value)||1),
       };
       if (d.id) {
         await apiFetch('/api/redemptions/'+d.id, {method:'PUT', body:JSON.stringify(payload)});

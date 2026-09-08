@@ -1,5 +1,7 @@
 /* ── Cost Basis tab ──────────────────────────────────────────── */
 let costBasisShowLiveOnly = false;
+let lastBasisMap = {}; // cached for the lazily-rendered chart panel (see toggleChartPanel)
+let costBasisChart = null;
 
 async function renderCostBasis() {
   const pane = document.getElementById('pane-costbasis');
@@ -8,6 +10,7 @@ async function renderCostBasis() {
   try {
     [entries, basisMap] = await Promise.all([apiFetch('/api/cost-entries'), apiFetch('/api/cost-basis')]);
     ST.costBasis = basisMap || {};
+    lastBasisMap = basisMap || {};
   } catch(e) {
     pane.innerHTML = `<div class="api-banner"><span class="api-dot err"></span>Could not load cost basis. Is the server running?</div>`;
     return;
@@ -38,13 +41,17 @@ async function renderCostBasis() {
     remainingEquivMilesSum += equivMiles(progId, b.remaining_miles || 0);
   });
   const blendedCpm = remainingEquivMilesSum > 0 ? (remainingCostSum / remainingEquivMilesSum) : 0;
-  const progsCovered = Object.keys(basisMap).length;
   // Rank on miles-equivalent cost, not raw stored units, so a bank program's
   // ¢/point rate isn't compared directly against an FFP's ¢/mile rate.
-  const cheapest = Object.entries(basisMap)
+  const rankedByCpm = Object.entries(basisMap)
     .map(([id, b]) => [id, b, milesEquivCpm(id, (b.cost_per_mile||0)*100)])
     .filter(([,,equivCents]) => equivCents > 0)
-    .sort((a,b) => a[2] - b[2])[0];
+    .sort((a,b) => a[2] - b[2]);
+  const cheapest = rankedByCpm[0];
+  // Most expensive: the mirror of "cheapest" — flags whichever currency is
+  // quietly costing the most per mile, so it's worth a second look (maybe
+  // that card isn't earning its keep, or a promo rate has drifted).
+  const mostExpensive = rankedByCpm.length > 0 ? rankedByCpm[rankedByCpm.length-1] : null;
 
   let listHtml = '';
   if (entries.length === 0) {
@@ -54,42 +61,56 @@ async function renderCostBasis() {
       <div style="font-size:12px;margin-top:6px">Log what you actually paid for miles or points — annual fees, spend requirements, cash top-ups, transfer costs — to see your real cost per program, in the correct unit (¢/mile for FFPs, ¢/point for bank programs).</div>
     </div>`;
   } else {
-    // Group by program
+    // Group by program, then split into two top-level sections. Bank points
+    // and FFP miles are fundamentally different concepts — different units
+    // (pts vs mi), different meaning (not-yet-redeemable vs redeemable), and
+    // different next action (transfer vs done) — so they're never interleaved
+    // in one flat, alphabetically-sorted list.
     const byProg = {};
     entries.forEach(e => { (byProg[e.program_id] = byProg[e.program_id]||[]).push(e); });
-    const progIds = Object.keys(byProg).sort((a,b) => progLabel(a).localeCompare(progLabel(b)));
-    let anyProgramShown = false;
-    progIds.forEach(progId => {
+    const allProgIds  = Object.keys(byProg).sort((a,b) => progLabel(a).localeCompare(progLabel(b)));
+    const bankProgIds = allProgIds.filter(id => isBankProgram(id));
+    const ffpProgIds  = allProgIds.filter(id => !isBankProgram(id));
+
+    const renderProgramTable = (progId) => {
       // "Live only" hides fully-consumed lots (status === 'consumed') — the ones
       // that have been entirely transferred elsewhere and are pure audit trail.
       // Partially-consumed lots still show, since part of their balance is live.
       const rows = costBasisShowLiveOnly
         ? byProg[progId].filter(e => e.status !== 'consumed')
         : byProg[progId];
-      if (rows.length === 0) return; // whole program has nothing live to show under this filter
-      anyProgramShown = true;
+      if (rows.length === 0) return ''; // whole program has nothing live to show under this filter
       const basis = basisMap[progId];
       const isBank = isBankProgram(progId);
       const unitLabel = costUnitLabel(progId);
+      const unitColHeader = isBank ? 'Points' : 'Miles'; // never the ambiguous "Miles/pts" — each table is one unit only
       const nativePillCents = basis ? basis.cost_per_mile*100 : 0;
       const equivPillCents = basis ? milesEquivCpm(progId, nativePillCents) : 0;
       const pillCls = basis ? cpmCls(equivPillCents) : '';
-      listHtml += `<div class="sec-hd" style="display:flex;align-items:center;gap:8px">
+      // Bank Points entries are always type 'acquisition' — a transfer's
+      // destination is always an FFP (the transfer modal only offers FFPs as
+      // destinations), so a bank program can never receive a 'transfer' row.
+      // The Type column would be 100% redundant here, so bank tables drop it
+      // entirely — one fewer column also helps these tables fit narrower
+      // screens without the horizontal-scroll fallback kicking in as often.
+      // FFP tables keep it: they genuinely mix 'acquisition' (organic/buy-miles)
+      // and 'transfer' (converted in from a bank) rows.
+      return `<div class="sec-hd" style="display:flex;align-items:center;gap:8px">
         <div style="width:20px;height:20px;border-radius:4px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;border:0.5px solid var(--sq-border)">${logoImg(progLogoUrl(progId), progId.slice(0,2).toUpperCase(), 20)}</div>
         ${progLabel(progId)}
         ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}" title="${isBank ? `Own rate: ${nativePillCents.toFixed(3)}${unitLabel} · ≈${equivPillCents.toFixed(3)}¢/mi equivalent at today's published conversion rate — the exact rate only locks in once you actually transfer.` : ''}">${nativePillCents.toFixed(3)}${unitLabel}${isBank ? ` blended <span class="text-muted">(≈${equivPillCents.toFixed(3)}¢/mi)</span>` : ' blended'} · ${fmt(basis.remaining_miles)} ${isBank?'pts':'mi'} live</span>` : ''}
         <div class="sec-hd-line"></div>
       </div>
-      <div class="card mb-16"><table class="tbl" style="table-layout:fixed">
+      <div class="card mb-16"><div class="table-scroll"><table class="tbl">
         <thead><tr>
-          <th style="width:8%">Date</th>
-          <th style="width:10%">Type</th>
-          <th style="width:${isBank ? 25 : 14}%">Source</th>
-          <th style="width:7%;text-align:right">Miles/pts</th>
-          <th style="width:7%;text-align:right">Cost (S$)</th>
-          <th style="width:${isBank ? 9 : 9}%;text-align:right">¢/mi</th>
-          <th style="width:${isBank ? 19 : 30}%">Notes</th>
-          <th style="width:${isBank ? 10 : 15}%;text-align:right"></th>
+          <th style="width:10%">Date</th>
+          ${isBank ? '' : '<th style="width:9%">Type</th>'}
+          <th style="width:${isBank ? 24 : 15}%">Source</th>
+          <th style="width:9%;text-align:right">${unitColHeader}</th>
+          <th style="width:8%;text-align:right">Cost (S$)</th>
+          <th style="width:11%;text-align:right">¢/mi</th>
+          <th style="width:${isBank ? 22 : 26}%">Notes</th>
+          <th style="width:${isBank ? 16 : 14}%;text-align:right"></th>
         </tr></thead>
         <tbody>
           ${rows.map(e => {
@@ -114,7 +135,7 @@ async function renderCostBasis() {
                  <button class="btn btn-sm" style="color:var(--sq-danger);border-color:rgba(153,28,28,.3)" onclick="deleteCostEntry(${e.id})">Del</button>`;
             return `<tr>
               <td class="text-sm text-muted" style="white-space:nowrap">${dt}</td>
-              <td>${typePill}</td>
+              ${isBank ? '' : `<td>${typePill}</td>`}
               <td style="font-weight:500">${e.source||'—'}${statusBadge}</td>
               <td style="text-align:right" class="mono">${fmt(e.miles_acquired)}</td>
               <td style="text-align:right" class="mono">${e.cost_sgd.toFixed(2)}</td>
@@ -124,9 +145,29 @@ async function renderCostBasis() {
             </tr>`;
           }).join('')}
         </tbody>
-      </table></div>`;
-    });
-    if (!anyProgramShown) {
+      </table></div></div>`;
+    };
+
+    const bankHtml = bankProgIds.map(renderProgramTable).join('');
+    const ffpHtml  = ffpProgIds.map(renderProgramTable).join('');
+
+    if (bankHtml) {
+      listHtml += `<div class="cbg-hd">
+        <span class="cbg-title">Bank Points</span>
+        <span class="cbg-badge bank">Convert via transfer</span>
+        <span class="cbg-sub">Card-earned points — not yet redeemable until transferred to an FFP</span>
+        <div class="sec-hd-line"></div>
+      </div>${bankHtml}`;
+    }
+    if (ffpHtml) {
+      listHtml += `<div class="cbg-hd">
+        <span class="cbg-title">Frequent Flyer Programs</span>
+        <span class="cbg-badge ffp">Redeemable</span>
+        <span class="cbg-sub">Miles you can book flights with directly</span>
+        <div class="sec-hd-line"></div>
+      </div>${ffpHtml}`;
+    }
+    if (!bankHtml && !ffpHtml) {
       listHtml = `<div class="empty-state">
         <div style="font-size:13px;color:var(--sq-text-mid)">No live lots right now — everything's been transferred elsewhere.</div>
         <div style="font-size:12px;margin-top:6px">Switch to "All" to see the full history, including consumed lots.</div>
@@ -148,9 +189,9 @@ async function renderCostBasis() {
         <div class="metric-sub" title="Bank points are converted to their miles-equivalent at today's rate so this total is on one consistent unit — see each program's row below for the raw ¢/pt figure.">≈${fmt(totalEquivMiles)} mi-equiv, all-time gross</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Programs tracked</div>
-        <div class="metric-value">${progsCovered}</div>
-        <div class="metric-sub">${entries.length} cost entr${entries.length!==1?'ies':'y'}</div>
+        <div class="metric-label">Most expensive program</div>
+        <div class="metric-value" style="font-size:16px">${mostExpensive ? progLookup(mostExpensive[0])?.code || progLabel(mostExpensive[0]) : '—'}</div>
+        <div class="metric-sub" title="${mostExpensive ? 'Ranked on miles-equivalent cost, so bank programs (converted from ¢/pt) and FFPs compare fairly.' : ''}">${mostExpensive ? mostExpensive[2].toFixed(3)+'¢/mi equiv' : 'No data yet'}</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Cheapest program</div>
@@ -179,12 +220,26 @@ async function renderCostBasis() {
         <div class="help-note mb-16">
           <ul style="margin:6px 0 0 18px;padding:0">
             <li style="margin-bottom:4px"><strong>A "lot"</strong> = one cost entry, i.e. one specific batch of points/miles you got at a specific cost (e.g. one year's card fee, one tax payment).</li>
-            <li style="margin-bottom:4px"><strong>Log bank points</strong> when a bank card earned it — annual fee, min-spend bonus, a card's processing fee on a tax payment — even though you'll convert it to an FFP later via Log Transfer.</li>
-            <li style="margin-bottom:4px"><strong>Log miles</strong> when miles landed directly in an FFP with no bank in between — organic flying (cost $0), an airline's "buy miles" promo, or a co-branded card that credits miles straight to the FFP.</li>
-            <li style="margin-bottom:4px"><strong>Log transfer</strong> when you move points/miles you've already logged into a different program (e.g. DBS Points → KrisFlyer). This carries the original cost forward with the miles and splits any transfer fee across the sources — it does <em>not</em> create new cost, so you avoid paying for the same dollar twice.</li>
-            <li>Once a lot is transferred out, its balance drops to 0 there and it stops counting toward that program's blended rate — the cost basis "moves" with the miles to the destination program.</li>
-            <li style="margin-top:4px"><strong>Points ≠ miles.</strong> A bank program's rate is shown as ¢/pt, never ¢/mi — 3,096 DBS points at $82.91 is 2.678¢/pt, not 2.678¢/mi, since DBS converts at 2 miles per point. Rows for bank programs show a small "≈X¢/mi equivalent" alongside the raw ¢/pt figure, and that converted figure — not the raw one — is what's used for the green/red target-valuation coloring and the "cheapest program" ranking, so bank and FFP rates are never compared apples-to-oranges. The real, locked-in rate is only fixed once you actually run a transfer.</li>
+            <li style="margin-bottom:4px"><strong>+ Log bank points</strong> when a bank card earned it — annual fee, min-spend bonus, a card's processing fee on a tax payment — even though you'll convert it to an FFP later via Log Transfer. These always show up in the <strong>Bank Points</strong> section below.</li>
+            <li style="margin-bottom:4px"><strong>+ Log miles</strong> when miles landed directly in an FFP with no bank in between — organic flying (cost $0), an airline's "buy miles" promo, or a co-branded card that credits miles straight to the FFP. These show up in the <strong>Frequent Flyer Programs</strong> section.</li>
+            <li style="margin-bottom:4px"><strong>+ Log transfer</strong> when you move points/miles you've already logged into an FFP (e.g. DBS Points → KrisFlyer). This carries the original cost forward with the miles and splits any transfer fee across the sources — it does <em>not</em> create new cost, so you avoid paying for the same dollar twice. A transfer always lands in the FFP section, since bank programs can never be a transfer's destination.</li>
+            <li style="margin-bottom:4px">Once a lot is transferred out, its balance drops to 0 there and it stops counting toward that program's blended rate — the cost basis "moves" with the miles to the destination program. That's why the <strong>Bank Points</strong> tables never show a "Type" column: every row there is always an acquisition (nothing can ever be transferred <em>into</em> a bank program), so the column would be 100% redundant. FFP tables keep it, since they genuinely mix acquisitions and transfers.</li>
+            <li style="margin-top:4px"><strong>Points ≠ miles.</strong> A bank program's rate is shown as ¢/pt, never ¢/mi — 3,096 DBS points at $82.91 is 2.678¢/pt, not 2.678¢/mi, since DBS converts at 2 miles per point. Bank rows show a small "≈X¢/mi equivalent" alongside the raw ¢/pt figure, and that converted figure — not the raw one — is what's used for the green/red target-valuation coloring, the "cheapest program" ranking, and the chart above. The real, locked-in rate is only fixed once you actually run a transfer.</li>
+            <li><strong>Live only</strong> hides lots that have been fully transferred elsewhere (0 remaining) — pure audit-trail noise for day-to-day use. Switch back to "All" any time to see full history, including consumed lots.</li>
           </ul>
+        </div>
+      </div>
+    </div>
+    <div id="chart-panel-wrapper" style="margin-bottom:1rem">
+      <div id="chart-toggle-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--sq-navy-light);border-radius:6px;cursor:pointer;border:0.5px solid var(--sq-border);user-select:none" onclick="toggleChartPanel()" title="Toggle blended valuation chart">
+        <span id="chart-chevron" style="display:inline-block;transition:transform 0.2s ease;font-size:12px;color:var(--sq-text-muted)">▼</span>
+        <span style="font-weight:500;font-size:13px">Blended valuation by program (FFP)</span>
+        <span class="text-muted text-sm" style="flex:1;text-align:right" id="chart-toggle-hint">(click to expand)</span>
+      </div>
+      <div id="chart-panel-content" style="max-height:0;overflow:hidden;transition:max-height 0.25s ease,padding 0.25s ease">
+        <div class="card mb-16" style="margin-top:10px">
+          <div style="position:relative;height:220px"><canvas id="costbasis-chart-canvas"></canvas></div>
+          <div class="help-note" style="margin-top:10px">Each bar is one FFP, colored to match its airline branding elsewhere in the app. The dashed gold line is your target valuation — bars taller than the line are costing you more per mile than you're aiming for; bars below it are within target.</div>
         </div>
       </div>
     </div>
@@ -204,8 +259,8 @@ async function renderCostBasis() {
     </div>
     ${listHtml}`;
   
-  // Initialize help panel collapsed/expanded state
-  setTimeout(initHelpPanel, 0);
+  // Initialize help panel and chart panel collapsed/expanded state
+  setTimeout(() => { initHelpPanel(); initChartPanel(); }, 0);
 }
 
 function initHelpPanel() {
@@ -252,6 +307,139 @@ function toggleHelpPanel() {
 function setCostBasisFilter(liveOnly) {
   costBasisShowLiveOnly = liveOnly;
   renderCostBasis();
+}
+
+/* ── Blended valuation chart (FFP only, hidden by default) ─────────────────
+ * Hidden by default per design: this is a supplementary view, not something
+ * needed for day-to-day logging, so it starts collapsed and is only rendered
+ * (lazily) the first time it's actually expanded — a Chart.js canvas sized
+ * inside a max-height:0 container would otherwise compute to 0x0.
+ */
+function initChartPanel() {
+  const content = document.getElementById('chart-panel-content');
+  const chevron = document.getElementById('chart-chevron');
+  const hint = document.getElementById('chart-toggle-hint');
+  if (!content) return;
+
+  const collapsed = localStorage.getItem('costbasis-chart-collapsed') !== '0'; // default: hidden
+  if (collapsed) {
+    content.style.maxHeight = '0px';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+    if (hint) hint.textContent = '(click to expand)';
+  } else {
+    renderCostBasisChart(lastBasisMap);
+    content.style.maxHeight = content.scrollHeight + 'px';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (hint) hint.textContent = '(click to collapse)';
+  }
+}
+
+function toggleChartPanel() {
+  const content = document.getElementById('chart-panel-content');
+  const chevron = document.getElementById('chart-chevron');
+  const hint = document.getElementById('chart-toggle-hint');
+  if (!content) return;
+
+  const currentMax = content.style.maxHeight;
+  if (currentMax === '0px' || !currentMax) {
+    renderCostBasisChart(lastBasisMap);
+    content.style.maxHeight = content.scrollHeight + 'px';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (hint) hint.textContent = '(click to collapse)';
+    localStorage.setItem('costbasis-chart-collapsed', '0');
+  } else {
+    content.style.maxHeight = '0px';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+    if (hint) hint.textContent = '(click to expand)';
+    localStorage.setItem('costbasis-chart-collapsed', '1');
+  }
+}
+
+function renderCostBasisChart(basisMap) {
+  const canvas = document.getElementById('costbasis-chart-canvas');
+  if (!canvas) return;
+  const idealCpm = Number(ST.settings?.ideal_cpm) || 0;
+
+  // FFP only — a bank program's own rate is ¢/pt, and while it CAN be
+  // converted to a miles-equivalent (like everywhere else in this tab), the
+  // conversion is an estimate until actually transferred. The chart is meant
+  // as "what am I really paying per mile right now", so it sticks to
+  // programs holding real, locked-in miles.
+  const progIds = Object.keys(basisMap)
+    .filter(id => !isBankProgram(id) && (basisMap[id].remaining_miles||0) > 0)
+    .sort((a,b) => (basisMap[a].cost_per_mile||0) - (basisMap[b].cost_per_mile||0));
+
+  if (costBasisChart) { costBasisChart.destroy(); costBasisChart = null; }
+
+  if (progIds.length === 0) {
+    canvas.parentElement.innerHTML = '<div class="text-muted text-sm" style="padding:2rem 0;text-align:center">No live FFP miles to chart yet — log some miles or run a transfer first.</div>';
+    return;
+  }
+
+  const values = progIds.map(id => (basisMap[id].cost_per_mile||0) * 100);
+  // Match the dashboard's own bar chart: color by program/airline brand
+  // identity (falls back to alliance color), not by value — the target-line
+  // benchmark below is what signals good/bad value, so bar color stays
+  // consistent with how this program is colored everywhere else in the app.
+  const progColor = id => {
+    const p = progLookup(id);
+    return p?.color || AC[p?.alliance]?.bg || '#8895b8';
+  };
+  const colors = progIds.map(progColor);
+
+  // Force the y-axis to always include the target line, padded above
+  // whichever is larger (tallest bar or the target itself) — otherwise
+  // Chart.js's auto-scaled max can end up below idealCpm whenever every
+  // program is already cheaper than target, silently clipping the dashed
+  // line out of the visible area entirely.
+  const axisMax = Math.max(...values, idealCpm || 0) * 1.18;
+
+  costBasisChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: progIds.map(id => progLookup(id)?.code || progLabel(id)),
+      datasets: [{
+        label: 'Blended ¢/mile',
+        data: values,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1.5, borderRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: {display:false},
+        tooltip: {callbacks:{label: c => ' ' + c.raw.toFixed(3) + '¢/mile'}},
+      },
+      scales: {
+        y: {beginAtZero:true, suggestedMax: axisMax, grid:{color:'rgba(13,31,92,.06)'}, ticks:{font:{size:10}, callback:v=>v.toFixed(2)+'¢'}},
+        x: {grid:{display:false}, ticks:{font:{size:10}, maxRotation:28, autoSkip:false}}
+      }
+    },
+    plugins: [{
+      id: 'targetValuationLine',
+      afterDraw(chart) {
+        if (!idealCpm) return;
+        const {ctx, chartArea, scales:{y}} = chart;
+        const yPix = y.getPixelForValue(idealCpm);
+        if (yPix < chartArea.top - 1 || yPix > chartArea.bottom + 1) return; // truly off-chart, nothing sane to draw
+        ctx.save();
+        ctx.strokeStyle = '#c8a46a';
+        ctx.setLineDash([5,4]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(chartArea.left, yPix);
+        ctx.lineTo(chartArea.right, yPix);
+        ctx.stroke();
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#8a6d1a';
+        ctx.textAlign = 'right';
+        ctx.fillText(`target ${idealCpm.toFixed(2)}¢`, chartArea.right - 4, yPix - 4);
+        ctx.restore();
+      }
+    }]
+  });
 }
 
 async function saveIdealCpm() {
@@ -454,7 +642,7 @@ async function transferModal() {
       </div>
       <div class="form-group">
         <label class="form-label">Transfer date</label>
-        <input class="form-input" type="date" id="xf-date" value="${new Date().toISOString().slice(0,10)}">
+        <input class="form-input" type="date" id="xf-date" value="${todayISO()}">
       </div>
     </div>
     <div class="form-group">
@@ -557,11 +745,19 @@ async function transferModal() {
 
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
+      // A generic "Transfer in" tells you nothing when scanning the FFP
+      // table — build something that actually names where the miles came
+      // from, e.g. "Transfer from DBS Points" or "Transfer from DBS Points +
+      // Citi Miles" when a batch pools multiple bank programs together.
+      const srcProgNames = [...new Set(checked.map(e => progLookup(e.program_id)?.name || progLabel(e.program_id)))];
+      const sourceLabel = 'Transfer from ' + srcProgNames.join(' + ');
+
       await apiFetch('/api/cost-transfers', {method:'POST', body: JSON.stringify({
         dest_program_id: destProg,
         entry_date: document.getElementById('xf-date').value,
         transfer_fee: Math.max(0, parseNum(document.getElementById('xf-fee').value)),
         notes: document.getElementById('xf-notes').value,
+        source: sourceLabel,
         sources,
       })});
       showToast('Transfer logged — cost basis reconciled ✓');
@@ -582,8 +778,13 @@ async function viewCostTransfer(id) {
   document.querySelector('#modal .modal').classList.remove('wide');
   document.getElementById('modal-hd').innerHTML = 'Transfer Breakdown';
   const rows = data.links.map(l => {
+    const srcDt = l.source_date ? new Date(l.source_date+'T00:00:00').toLocaleDateString('en-SG',{day:'numeric',month:'short',year:'numeric'}) : '';
+    const srcName = progLabel(l.source_program_id) || `Lot #${l.source_entry_id}`;
     return `<tr>
-      <td class="text-sm">Lot #${l.source_entry_id}</td>
+      <td class="text-sm">
+        <div style="font-weight:500">${srcName}</div>
+        <div class="text-muted" style="font-size:10.5px">${l.source_label||'—'}${srcDt ? ' · '+srcDt : ''}</div>
+      </td>
       <td style="text-align:right" class="mono">${fmt(l.miles_consumed)}</td>
       <td style="text-align:right" class="mono">${fmt(l.dest_miles)}mi</td>
       <td style="text-align:right" class="mono">${l.conversion_rate.toFixed(4)}</td>
@@ -593,10 +794,10 @@ async function viewCostTransfer(id) {
   }).join('');
   document.getElementById('modal-body').innerHTML = `
     <div class="ref-box mb-16">${fmt(data.entry.miles_acquired)}mi produced for $${data.entry.cost_sgd.toFixed(2)} in ${progLabel(data.entry.program_id)} on ${data.entry.entry_date}</div>
-    <table class="tbl">
+    <div class="table-scroll"><table class="tbl">
       <thead><tr><th>Source</th><th style="text-align:right">Consumed</th><th style="text-align:right">Dest mi</th><th style="text-align:right">Rate</th><th style="text-align:right">Inherited $</th><th style="text-align:right">Fee $</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
     <div class="help-note" style="margin-top:12px;font-size:11px">Rate is frozen at the moment of this transfer — it stays put even if the bank's published conversion rate changes later, so past transfers never get silently recalculated.</div>`;
   onSave = () => closeModal();
   openModal();

@@ -164,6 +164,13 @@ def _run_migrations(db):
         db.execute("ALTER TABLE redemptions ADD COLUMN via TEXT NOT NULL DEFAULT ''")
     if "block_time_minutes" not in cols:
         db.execute("ALTER TABLE redemptions ADD COLUMN block_time_minutes INTEGER NOT NULL DEFAULT 0")
+    if "pax" not in cols:
+        # Number of seats this redemption covers, all at the SAME per-seat
+        # miles_used/cash_value/taxes_fees rate — e.g. 2 business-class seats
+        # booked together at an identical mileage rate is one row with pax=2,
+        # rather than two duplicate rows. Existing rows default to 1 (no
+        # behavior change for anything logged before this column existed).
+        db.execute("ALTER TABLE redemptions ADD COLUMN pax INTEGER NOT NULL DEFAULT 1")
 
     # Migration: lot-tracking fields on cost_entries (supports transfer reconciliation)
     cost_cols = {r["name"] for r in db.execute("PRAGMA table_info(cost_entries)").fetchall()}

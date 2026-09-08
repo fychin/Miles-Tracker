@@ -231,8 +231,8 @@ def create_redemption():
     body = request.get_json(force=True)
     db = get_db()
     cur = db.execute(
-        "INSERT INTO redemptions (program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes) "
-        "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes)",
+        "INSERT INTO redemptions (program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes,pax) "
+        "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes,:pax)",
         {
             "program_id":  str(body.get("program_id","")).strip(),
             "travel_date": str(body.get("travel_date","")).strip(),
@@ -248,6 +248,7 @@ def create_redemption():
             "cash_value":  float(body.get("cash_value",0) or 0),
             "taxes_fees":  float(body.get("taxes_fees",0) or 0),
             "block_time_minutes": int(body.get("block_time_minutes",0) or 0),
+            "pax":         max(1, int(body.get("pax",1) or 1)),
         }
     )
     db.commit()
@@ -262,7 +263,7 @@ def update_redemption(rid):
         "UPDATE redemptions SET program_id=:program_id, travel_date=:travel_date, "
         "miles_used=:miles_used, cabin=:cabin, route=:route, origin=:origin, destination=:destination, via=:via, "
         "airline=:airline, one_way=:one_way, notes=:notes, cash_value=:cash_value, taxes_fees=:taxes_fees, "
-        "block_time_minutes=:block_time_minutes WHERE id=:id",
+        "block_time_minutes=:block_time_minutes, pax=:pax WHERE id=:id",
         {
             "id": rid,
             "program_id":  str(body.get("program_id","")).strip(),
@@ -279,6 +280,7 @@ def update_redemption(rid):
             "cash_value":  float(body.get("cash_value",0) or 0),
             "taxes_fees":  float(body.get("taxes_fees",0) or 0),
             "block_time_minutes": int(body.get("block_time_minutes",0) or 0),
+            "pax":         max(1, int(body.get("pax",1) or 1)),
         }
     )
     db.commit()
@@ -594,7 +596,9 @@ def create_cost_transfer():
 
     row   = _annotate_entry(dict(db.execute("SELECT * FROM cost_entries WHERE id=?", (transfer_id,)).fetchone()))
     links = [dict(r) for r in db.execute(
-        "SELECT * FROM cost_transfer_links WHERE transfer_entry_id=?", (transfer_id,)
+        "SELECT l.*, ce.program_id AS source_program_id, ce.source AS source_label, ce.entry_date AS source_date "
+        "FROM cost_transfer_links l JOIN cost_entries ce ON ce.id = l.source_entry_id "
+        "WHERE l.transfer_entry_id=?", (transfer_id,)
     ).fetchall()]
     return jsonify({"entry": row, "links": links}), 201
 
@@ -604,8 +608,12 @@ def get_cost_transfer(transfer_id):
     row = db.execute("SELECT * FROM cost_entries WHERE id=? AND entry_type='transfer'", (transfer_id,)).fetchone()
     if row is None:
         return jsonify({"error": "not found"}), 404
+    # JOIN back to the source lot for a human-readable label (program + what
+    # it was + when) instead of making the client show a bare internal id.
     links = [dict(r) for r in db.execute(
-        "SELECT * FROM cost_transfer_links WHERE transfer_entry_id=?", (transfer_id,)
+        "SELECT l.*, ce.program_id AS source_program_id, ce.source AS source_label, ce.entry_date AS source_date "
+        "FROM cost_transfer_links l JOIN cost_entries ce ON ce.id = l.source_entry_id "
+        "WHERE l.transfer_entry_id=?", (transfer_id,)
     ).fetchall()]
     return jsonify({"entry": _annotate_entry(dict(row)), "links": links})
 
@@ -697,12 +705,13 @@ def import_all():
     for row in data.get("redemptions", []):
         db.execute(
             "INSERT INTO redemptions "
-            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes) "
-            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes)",
+            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes,pax) "
+            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes,:pax)",
             {k: row.get(k,"") for k in ["program_id","travel_date","cabin","route","origin","destination","via","airline","notes"]}
             | {"miles_used": int(row.get("miles_used",0)), "one_way": int(row.get("one_way",0)),
                "cash_value": float(row.get("cash_value",0) or 0), "taxes_fees": float(row.get("taxes_fees",0) or 0),
-               "block_time_minutes": int(row.get("block_time_minutes",0) or 0)}
+               "block_time_minutes": int(row.get("block_time_minutes",0) or 0),
+               "pax": max(1, int(row.get("pax",1) or 1))}
         )
         count["redemptions"] += 1
     for row in data.get("cost_entries", []):
