@@ -6,15 +6,32 @@ let costBasisChart = null;
 async function renderCostBasis() {
   const pane = document.getElementById('pane-costbasis');
   pane.innerHTML = '<div style="color:var(--sq-text-muted);padding:2rem 0;font-size:13px">Loading…</div>';
-  let entries = [], basisMap = {};
+  let entries = [], basisMap = {}, allLinks = [];
   try {
-    [entries, basisMap] = await Promise.all([apiFetch('/api/cost-entries'), apiFetch('/api/cost-basis')]);
+    [entries, basisMap, allLinks] = await Promise.all([apiFetch('/api/cost-entries'), apiFetch('/api/cost-basis'), apiFetch('/api/cost-transfer-links')]);
     ST.costBasis = basisMap || {};
     lastBasisMap = basisMap || {};
   } catch(e) {
     pane.innerHTML = `<div class="api-banner"><span class="api-dot err"></span>Could not load cost basis. Is the server running?</div>`;
     return;
   }
+
+  // Group transfer links by their destination (transfer) entry id, so each
+  // FFP transfer row can build its Source column from the actual source
+  // lots feeding it — always in sync with what "Breakdown" shows — instead
+  // of the transfer entry's own frozen `source` text.
+  const linksByTransfer = {};
+  (allLinks||[]).forEach(l => { (linksByTransfer[l.transfer_entry_id] = linksByTransfer[l.transfer_entry_id]||[]).push(l); });
+  // Just the source program names (Type column already says "Transfer", so
+  // "Transfer from DBS Points" would be redundant). Hover tooltip shows the
+  // per-lot breakdown — which banks fed into this, and at what rates.
+  const transferSourceHtml = (entryId, fallback) => {
+    const links = linksByTransfer[entryId];
+    if (!links || links.length === 0) return fallback||'—'; // legacy/imported entry with no link rows — fall back gracefully
+    const names = [...new Set(links.map(l => progLabel(l.source_program_id)))];
+    const tooltip = links.map(l => `${progLabel(l.source_program_id)}: ${fmt(l.miles_consumed)} → ${fmt(l.dest_miles)}mi (${l.source_label||'—'})`).join('\n');
+    return `<span title="${tooltip.replace(/"/g,'&quot;')}">${names.join(' + ')}</span>`;
+  };
 
   const idealCpm = Number(ST.settings?.ideal_cpm) || 0;
   // Green when a rate is at/under your target valuation (good value), red when it exceeds it (expensive).
@@ -30,11 +47,18 @@ async function renderCostBasis() {
   const equivMiles = (progId, rawUnits) => {
     const bankProg = BANK.find(b => b.id === progId);
     if (!bankProg) return rawUnits;
+    if (bankProg.variableRate) return 0; // no known rate yet, see below
     const rate = mpp(bankProg);
     return rate > 0 ? rawUnits * rate : 0;
   };
   let totalCost = 0, totalEquivMiles = 0, remainingCostSum = 0, remainingEquivMilesSum = 0;
   Object.entries(basisMap).forEach(([progId, b]) => {
+    // variableRate programs (HeyMax) have no fixed rate to convert through, so
+    // their dollars can't be blended into a ¢/mile figure yet either — including
+    // the cost without a matching miles-equivalent would inflate the blended
+    // rate. They rejoin these totals naturally once transferred into an FFP,
+    // where the real snapshotted rate applies.
+    if (isVariableRateProgram(progId)) return;
     totalCost += b.total_cost || 0;
     totalEquivMiles += equivMiles(progId, b.total_miles || 0);
     remainingCostSum += b.remaining_cost || 0;
@@ -144,7 +168,7 @@ async function renderCostBasis() {
             return `<tr>
               <td class="text-sm text-muted" style="white-space:nowrap">${dt}</td>
               ${isBank ? '' : `<td>${typePill}</td>`}
-              <td style="font-weight:500">${e.source||'—'}${statusBadge}</td>
+              <td style="font-weight:500">${isXfer ? transferSourceHtml(e.id, e.source) : (e.source||'—')}${statusBadge}</td>
               <td style="text-align:right" class="mono">${fmt(e.miles_acquired)}</td>
               <td style="text-align:right" class="mono">${e.cost_sgd.toFixed(2)}</td>
               <td style="text-align:right;font-weight:${cpmCls(equivCpm)?'600':'400'};position:relative;height:32px" class="mono ${cpmCls(equivCpm)}" title="${isBank ? `Raw cost: ${nativeCpm.toFixed(3)}¢/pt — ≈${equivCpm.toFixed(3)}¢/mi equivalent at today's rate` : ''}">${isBank ? `<span style="display:block;line-height:1.3">${equivCpm.toFixed(3)}¢/mi</span><span class="text-muted" style="display:block;font-size:8.5px;font-weight:400;line-height:1.3;opacity:.7;margin-top:1px">(${nativeCpm.toFixed(3)}¢/pt)</span>` : `${equivCpm.toFixed(3)}¢/mi`}</td>
@@ -468,10 +492,10 @@ function costEntryModal(data, kind) {
   const unitWord = isBank ? 'points' : 'miles';
   const kindLabel = isBank ? 'Bank Points' : 'Miles';
   const kindNote = isBank
-    ? 'Bank points — you\'ll convert this to an FFP later via Log Transfer.'
-    : 'FFP miles, credited here directly — organic flying ($0 cost), a buy-miles promo, or a co-branded card. Not bank points you plan to transfer in.';
+    ? 'Points not yet in an FFP — bank card points or a purchased currency like HeyMax Max Miles. You\'ll convert this to an FFP later via Log Transfer.'
+    : 'FFP miles, credited here directly — organic flying ($0 cost), a buy-miles promo, or a co-branded card. Not bank points/Max Miles you plan to transfer in.';
   const sourcePlaceholder = isBank
-    ? 'e.g. DBS Altitude annual fee, min. spend bonus, tax-payment processing fee'
+    ? 'e.g. DBS Altitude annual fee, min. spend bonus, or a cash purchase of Max Miles'
     : 'e.g. Organic flying, KrisFlyer buy-miles promo, co-branded card credit';
 
   document.getElementById('modal-hd').innerHTML = d.id ? `Edit ${kindLabel} Entry` : `Log ${kindLabel}`;
@@ -525,7 +549,9 @@ function costEntryModal(data, kind) {
     }
     const unit = costUnitLabel(progId);
     let html = `$${cost.toFixed(2)} ÷ ${miles.toLocaleString()} ${isBank?'pts':'mi'} = <strong>${cpm.toFixed(3)}${unit}</strong>`;
-    if (isBank) {
+    if (isBank && isVariableRateProgram(progId)) {
+      html += ` <span class="text-muted">(¢/mi equivalent varies by destination FFP — you'll see the real figure once you log the transfer)</span>`;
+    } else if (isBank) {
       const equiv = milesEquivCpm(progId, cpm);
       html += ` <span class="text-muted">(≈${equiv.toFixed(3)}¢/mi equivalent once converted to an FFP at today's rate)</span>`;
     }

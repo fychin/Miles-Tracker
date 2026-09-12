@@ -3,7 +3,11 @@ let barChart = null;
 
 function renderDash() {
   const topFFP = FFP.map(p => ({p, m: ST.ffp[p.id]?.miles||0})).sort((a,b) => b.m - a.m)[0];
+  // variableRate programs (HeyMax) contribute 0 here rather than a guessed
+  // figure — see transferableMiles(). hasVariableRateBalance flags that so
+  // the tile can note the exclusion instead of silently undercounting.
   const bankMi = BANK.reduce((s, p) => s + transferableMiles(p, ST.bank[p.id]?.points), 0);
+  const hasVariableRateBalance = BANK.some(p => p.variableRate && (ST.bank[p.id]?.points||0) > 0);
   let milesAtRisk = 0;
   let bankPtsAtRiskMi = 0;
   const alerts = [];
@@ -59,7 +63,7 @@ function renderDash() {
       <div class="metric-card">
         <div class="metric-label">Bank pts → miles</div>
         <div class="metric-value gold">~${fmt(bankMi)}</div>
-        <div class="metric-sub">After block rounding</div>
+        <div class="metric-sub">${hasVariableRateBalance ? 'After block rounding · excl. variable-rate balances' : 'After block rounding'}</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Miles at risk</div>
@@ -95,7 +99,7 @@ function renderDash() {
               <td><div class="bank-cell"><div class="bank-logo">${logoImg(p.logo, p.bank[0], 28)}</div><span style="font-size:12px;font-weight:600;color:var(--sq-navy)">${p.name}</span></div></td>
               <td style="text-align:right" class="mono">${fmt(pts)} pts</td>
               <td style="text-align:right" class="mono">${fmt(transferable)} pts${rem > 0 ? `<div style="font-size:10px;color:var(--sq-text-muted)" title="Points below the ${fmt(p.fp)}-pt transfer block — can't move to an FFP until you earn enough more to complete another block">${fmt(rem)} pts leftover, below min. block</div>` : ''}</td>
-              <td style="text-align:right" class="mono" style="font-weight:600">${fmt(mi)} mi</td>
+              <td style="text-align:right" class="mono" style="font-weight:600">${p.variableRate ? '<span class="text-muted">—</span>' : fmt(mi) + ' mi'}</td>
               <td><span class="rate-pill">${rateStr(p)}</span></td>
               <td class="${expCls(days)} text-sm">${d?.expiry ? expTxt(d.expiry) : '—'}</td>
             </tr>`;

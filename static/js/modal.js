@@ -3,7 +3,12 @@ let onSave = null;
 
 function openModal() {
   document.getElementById('modal').style.display = 'flex';
-  setTimeout(() => document.querySelector('.form-input')?.focus(), 50);
+  // {preventScroll:true} stops the browser's default focus-triggered
+  // scrollIntoView — without it, focusing an input inside this fixed-position
+  // overlay was resetting the underlying page's scroll to the top every time
+  // a modal opened, since the browser tries to scroll the nearest non-fixed
+  // ancestor (the body) to "reveal" a fixed-position element.
+  setTimeout(() => document.querySelector('.form-input')?.focus({preventScroll:true}), 50);
 }
 function closeModal() {
   document.getElementById('modal').style.display = 'none';

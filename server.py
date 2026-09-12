@@ -483,6 +483,23 @@ def get_transfer_rate_history():
             out[d["program_id"]] = {"conversion_rate": d["conversion_rate"], "last_used": d["created_at"]}
     return jsonify(out)
 
+@app.route("/api/cost-transfer-links", methods=["GET"])
+def get_all_cost_transfer_links():
+    """Every transfer link across every transfer, joined back to each source
+    lot's program + original label — the same join get_cost_transfer() uses
+    for one transfer's Breakdown view, just for all of them at once. Lets the
+    Cost Basis tab render a transfer row's Source column straight from this
+    (authoritative, always-current) table instead of the transfer entry's own
+    `source` string, which is just a label frozen in text at save time and can
+    never reflect a program rename or other change made afterward."""
+    db = get_db()
+    links = [dict(r) for r in db.execute(
+        "SELECT l.*, ce.program_id AS source_program_id, ce.source AS source_label, ce.entry_date AS source_date "
+        "FROM cost_transfer_links l JOIN cost_entries ce ON ce.id = l.source_entry_id "
+        "ORDER BY l.transfer_entry_id, l.id"
+    ).fetchall()]
+    return jsonify(links)
+
 # ── App settings (small key/value store, e.g. ideal cost-per-mile valuation) ──
 DEFAULT_SETTINGS = {"ideal_cpm": "1.5"}  # cents per mile — a common rough "good value" benchmark
 

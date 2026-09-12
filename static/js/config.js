@@ -52,6 +52,13 @@ const BANK = [
   {id:'amexMR',      name:'Amex Membership Rewards',bank:'American Express',   logo:'https://www.google.com/s2/favicons?domain=americanexpress.com&sz=64', fp:550,  tm:250},
   {id:'amexPlat',    name:'Amex Platinum Points',   bank:'American Express',   logo:'https://www.google.com/s2/favicons?domain=americanexpress.com&sz=64', fp:500,  tm:250},
   {id:'maybankTreat',name:'Maybank TREATS Points',  bank:'Maybank',            logo:'https://www.google.com/s2/favicons?domain=maybank.com&sz=64',    fp:5000,  tm:1000},
+  // HeyMax "Max Miles" — not a bank card, but mechanically identical: bought/earned
+  // as a standalone currency, held as a cost-basis lot, later transferred into an FFP.
+  // variableRate:true because there's no single blended rate to show here (unlike the
+  // programs above): most partners convert 1:1, but e.g. KrisFlyer isn't a direct
+  // partner at all (only a lossy two-hop via yuu), so tm is left null on purpose —
+  // the real rate is entered by hand per-transfer in the Log Transfer modal.
+  {id:'heymax',      name:'Max Miles',              bank:'HeyMax',             logo:'https://www.google.com/s2/favicons?domain=heymax.ai&sz=64',      fp:1000,  tm:null, variableRate:true},
 ];
 
 const CABINS = [

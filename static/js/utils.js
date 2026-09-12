@@ -80,8 +80,17 @@ function isBankProgram(progId) {
 function milesEquivCpm(progId, nativeCpm) {
   const bankProg = BANK.find(b => b.id === progId);
   if (!bankProg) return nativeCpm; // already miles-denominated (FFP) or unknown
+  if (bankProg.variableRate) return 0; // no known rate yet — see isVariableRateProgram()
   const rate = mpp(bankProg);
   return rate > 0 ? nativeCpm / rate : 0;
+}
+// True for programs with no fixed points→miles rate (e.g. HeyMax Max Miles),
+// where the real conversion depends on which FFP you transfer into and is
+// only known once you actually log that transfer. Callers use this to skip
+// showing/summing a fabricated miles-equivalent figure for these programs.
+function isVariableRateProgram(progId) {
+  const bankProg = BANK.find(b => b.id === progId);
+  return !!(bankProg && bankProg.variableRate);
 }
 // Short unit label for a program's native cost-basis figures.
 function costUnitLabel(progId) {
@@ -128,6 +137,10 @@ function remainderPts(p, pts) {
 }
 
 function rateStr(p) {
+  // Some programs (HeyMax Max Miles) don't have one fixed blended rate to
+  // show — the real number depends on which FFP you're transferring into
+  // and is entered by hand at transfer time. Say so instead of faking a rate.
+  if (p.variableRate) return 'varies by partner';
   const r = mpp(p);
   return r >= 1 ? (Number.isInteger(r) ? r : r.toFixed(3)) + ' mi/pt'
                 : (r * 1000).toFixed(2) + ' mi/1000pt';
@@ -224,6 +237,9 @@ function progLogoUrl(id) {
 // (promo bonuses, rounding) so this is a starting point, not the final word.
 function suggestDestMiles(sourceProgId, miles) {
   const bankProg = BANK.find(b => b.id === sourceProgId);
-  if (bankProg) return transferableMiles(bankProg, miles);
+  // variableRate programs (HeyMax) fall through to the 1:1 default below —
+  // it's the same "starting point, not the final word" treatment organic
+  // FFP miles get, since there's no single fixed block ratio to compute from.
+  if (bankProg && !bankProg.variableRate) return transferableMiles(bankProg, miles);
   return miles;
 }
