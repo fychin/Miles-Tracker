@@ -17,28 +17,23 @@ Miles & Points Tracker brings the same rigor to a rewards portfolio that you'd e
 
 ### Dashboard
 Portfolio at a glance — top balances, miles/points expiring soon ("at risk"), blended rates.
-
-<!-- ![Dashboard](docs/screenshots/dashboard.png) -->
+<img width="60%" alt="miles-tracker_dashboard" src="https://github.com/user-attachments/assets/42bbcbea-a635-47a1-b17a-e7179171878f" />
 
 ### FFP Miles
-Airline loyalty balances, grouped by alliance.
-
-<!-- ![FFP Miles](docs/screenshots/ffp-miles.png) -->
+Airline loyalty balances, grouped by alliance.  
+<img width="60%" alt="miles-tracker_ffp" src="https://github.com/user-attachments/assets/6f298f49-23f9-43ea-a87f-965444ad6783" />
 
 ### Bank Points
 Credit card and wallet points balances (incl. HeyMax Max Miles), with transfer-block math.
-
-<!-- ![Bank Points](docs/screenshots/bank-points.png) -->
-
-### Cost Basis
-The core ledger — acquisitions, transfers, and blended ¢/pt / ¢/mi per program, split cleanly between bank points and FFP miles.
-
-<!-- ![Cost Basis](docs/screenshots/cost-basis.png) -->
+<img width="60%" height="1767" alt="miles-tracker_bank" src="https://github.com/user-attachments/assets/3e8959fa-4625-4fe0-9b0b-78ab8000f30e" />
 
 ### Redemptions
 Logged redemptions with cabin coding, per-seat support, mi/min efficiency, savings, and a route map.
+<img width="60%" height="1511" alt="miles-tracker_redemption" src="https://github.com/user-attachments/assets/9c7b66da-e4f4-419b-8e52-c27e4f5be89a" />
 
-<!-- ![Redemptions](docs/screenshots/redemptions.png) -->
+### Cost Basis
+The core ledger — acquisitions, transfers, and blended ¢/pt / ¢/mi per program, split cleanly between bank points and FFP miles.
+<img width="60%" height="3348" alt="miles-tracker_costbasis" src="https://github.com/user-attachments/assets/c6001402-7499-4297-a6c0-8a1104c38a80" />
 
 Two additional tabs round out the app — **Activity** (a chronological feed of everything logged) and **Settings** (JSON export / merge-import / reset-import for your whole portfolio).
 
