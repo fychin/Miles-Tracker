@@ -43,15 +43,15 @@ const BANK = [
   {id:'citiRewards', name:'Citi Rewards Points',    bank:'Citi',               logo:'https://www.google.com/s2/favicons?domain=citibank.com.sg&sz=64', fp:25000, tm:10000},
   {id:'citiMiles',   name:'Citi Miles',             bank:'Citi',               logo:'https://www.google.com/s2/favicons?domain=citibank.com.sg&sz=64',  fp:10000, tm:10000},
   {id:'uobUni',      name:'UOB UNI$',               bank:'UOB',                logo:'https://www.google.com/s2/favicons?domain=uob.com.sg&sz=64',        fp:5000,  tm:10000},
-  {id:'hsbcPoints',  name:'HSBC Points',            bank:'HSBC',               logo:'https://www.google.com/s2/favicons?domain=hsbc.com.sg&sz=64',       fp:5,     tm:2},
+  {id:'hsbcPoints',  name:'HSBC Points',            bank:'HSBC',               logo:'https://www.google.com/s2/favicons?domain=hsbc.com.sg&sz=64',       fp:30000, tm:10000}, // 3:1, effective 16 Jan 2025 — best partner rate, not KrisFlyer (worse)
   {id:'dbsPoints',   name:'DBS Points',             bank:'DBS',                logo:'https://www.google.com/s2/favicons?domain=dbs.com.sg&sz=64',        fp:5000,  tm:10000},
-  {id:'ocbcDollar',  name:'OCBC$',                  bank:'OCBC',               logo:'https://www.google.com/s2/favicons?domain=ocbc.com.sg&sz=64',          fp:10000, tm:2900.232},
-  {id:'ocbc90n',     name:'OCBC 90°N Miles',        bank:'OCBC',               logo:'https://www.google.com/s2/favicons?domain=ocbc.com.sg&sz=64',          fp:1000,  tm:750.188},
+  {id:'ocbcDollar',  name:'OCBC$',                  bank:'OCBC',               logo:'https://www.google.com/s2/favicons?domain=ocbc.com.sg&sz=64',          fp:10000, tm:4000}, // best via KrisFlyer — Asia Miles rate (2,900.232) is worse, don't use
+  {id:'ocbc90n',     name:'OCBC 90°N Miles',        bank:'OCBC',               logo:'https://www.google.com/s2/favicons?domain=ocbc.com.sg&sz=64',          fp:1000,  tm:1000}, // 1:1 best via KrisFlyer — Asia Miles rate (750.188) is worse, don't use
   {id:'ocbcVoyage',  name:'OCBC VOYAGE Miles',      bank:'OCBC',               logo:'https://www.google.com/s2/favicons?domain=ocbc.com.sg&sz=64',          fp:1,     tm:1},
   {id:'sc360',       name:'SC 360° Points',         bank:'Standard Chartered', logo:'https://www.google.com/s2/favicons?domain=sc.com&sz=64',            fp:5000,  tm:2000},
-  {id:'amexMR',      name:'Amex Membership Rewards',bank:'American Express',   logo:'https://www.google.com/s2/favicons?domain=americanexpress.com&sz=64', fp:550,  tm:250},
+  {id:'amexMR',      name:'Amex Membership Rewards',bank:'American Express',   logo:'https://www.google.com/s2/favicons?domain=americanexpress.com&sz=64', fp:500,  tm:250}, // 2:1 per Amex SG's own page, current as of Jun 2026 — same ratio as Amex Platinum Points below
   {id:'amexPlat',    name:'Amex Platinum Points',   bank:'American Express',   logo:'https://www.google.com/s2/favicons?domain=americanexpress.com&sz=64', fp:500,  tm:250},
-  {id:'maybankTreat',name:'Maybank TREATS Points',  bank:'Maybank',            logo:'https://www.google.com/s2/favicons?domain=maybank.com&sz=64',    fp:5000,  tm:1000},
+  {id:'maybankTreat',name:'Maybank TREATS Points',  bank:'Maybank',            logo:'https://www.google.com/s2/favicons?domain=maybank.com&sz=64',    fp:2500,  tm:1000}, // 2.5:1
   // HeyMax "Max Miles" — not a bank card, but mechanically identical: bought/earned
   // as a standalone currency, held as a cost-basis lot, later transferred into an FFP.
   // variableRate:true because there's no single blended rate to show here (unlike the

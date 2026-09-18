@@ -196,9 +196,16 @@ function showToast(msg, dur=2400) {
   t._tid = setTimeout(() => t.classList.remove('show'), dur);
 }
 
-function cabinBadge(c) {
+function cabinBadge(c, large) {
   const cab = CABINS.find(x => x.id === c) || {label:c||'—', cls:'cabin-Y'};
-  return `<span class="cabin-badge ${cab.cls}">${cab.label}</span>`;
+  return `<span class="cabin-badge ${cab.cls}${large ? ' lg' : ''}">${cab.label}</span>`;
+}
+// Shared with the redemption cards' left accent bar and the route map's
+// polyline colors, so cabin color-coding is visually consistent everywhere
+// it appears rather than defined twice and allowed to drift apart.
+function cabinColor(c) {
+  const map = {F:'rgb(151, 66, 50)', J:'rgb(37, 65, 97)', W:'rgb(31, 99, 122)', Y:'rgb(46, 112, 91)'};
+  return map[c] || '#6b7da8';
 }
 function cabinOptions(sel) {
   return CABINS.map(c => `<option value="${c.id}" ${sel===c.id?'selected':''}>${c.label}</option>`).join('');

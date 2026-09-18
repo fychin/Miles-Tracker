@@ -26,13 +26,20 @@ async function renderRedemptions() {
     if (r.block_time_minutes > 0) { stat.miSum += r.miles_used; stat.minSum += r.block_time_minutes; }
   });
   const premiumSeats = (cabinStats['F']?.seats||0) + (cabinStats['J']?.seats||0);
-  const topProg  = (() => {
-    const cnt = {}; rows.forEach(r => { cnt[r.program_id]=(cnt[r.program_id]||0)+(r.miles_used||0)*(r.pax||1); });
-    const best = Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
-    if (!best) return '—';
-    const p = FFP.find(x=>x.id===best[0]);
-    return p ? p.code : best[0];
-  })();
+  // Weighted average ¢/mi realized across every redemption with a cash price
+  // logged — cash_value and miles_used are both stored per-seat, so weighting
+  // by (miles_used × pax) correctly reflects redemptions of different party
+  // sizes without letting a single big multi-seat trip get double-counted
+  // per passenger in a naive average.
+  let valuedCashSum = 0, valuedMilesSum = 0;
+  rows.forEach(r => {
+    if (r.cash_value > 0 && r.miles_used > 0) {
+      const pax = r.pax || 1;
+      valuedCashSum  += r.cash_value * pax;
+      valuedMilesSum += r.miles_used * pax;
+    }
+  });
+  const avgValuePerMile = valuedMilesSum > 0 ? (valuedCashSum / valuedMilesSum * 100) : null;
 
   let listHtml = '';
   if (rows.length === 0) {
@@ -62,11 +69,8 @@ async function renderRedemptions() {
         } else {
           routeDisplay = r.route || 'Route not set';
         }
-        const tripTypeLabel = r.one_way
-          ? '<span class="trip-badge trip-ow">One-way</span>'
-          : '<span class="trip-badge trip-rt">Round-trip</span>';
+        const tripTypeLabel = r.one_way ? 'One-way' : 'Round-trip';
         const pax = r.pax || 1;
-        const seatsBadge = pax > 1 ? `<span class="trip-badge" style="background:var(--sq-navy-light);color:var(--sq-text-mid)">×${pax} seats</span>` : '';
         const blockTimeLabel = fmtBlockTime(r.block_time_minutes);
         const mpm = r.block_time_minutes > 0 ? (r.miles_used / r.block_time_minutes) : null; // per-seat efficiency, unaffected by pax
         const basis = ST.costBasis[r.program_id];
@@ -76,6 +80,28 @@ async function renderRedemptions() {
         const groupTotalSpent = totalSpentPerSeat !== null ? totalSpentPerSeat * pax : null;
         const groupCashValue = (r.cash_value||0) * pax;
         const savings = (groupTotalSpent !== null && groupCashValue > 0) ? groupCashValue - groupTotalSpent : null;
+        // ¢/mi actually realized by this redemption — cash price it would've
+        // cost ÷ miles spent, both already per-seat. Deliberately NOT called
+        // "cpm" anywhere in code or UI: this app's own Cost Basis tab already
+        // uses that term for the opposite direction (¢/mi you paid to
+        // *acquire* the miles), and reusing it here would be exactly the kind
+        // of unit-conflation this app exists to avoid.
+        const valuePerMile = (r.cash_value > 0 && r.miles_used > 0) ? (r.cash_value / r.miles_used * 100) : null;
+        const valueMultiple = (valuePerMile !== null && cpm !== null) ? (valuePerMile / (cpm*100)) : null;
+
+        // Secondary, de-emphasized details — everything that isn't part of
+        // the cabin/mi-min/value-per-mile comparison row gets collapsed into
+        // one small muted line instead of competing for attention with it.
+        // Notes are kept off this line deliberately — free-text length varies
+        // a lot and mixing it with short fixed-format badges is what made the
+        // line read as cramped/uneven; it gets its own quiet line instead.
+        const secondaryBits = [];
+        if (dtLabel) secondaryBits.push(dtLabel);
+        secondaryBits.push(tripTypeLabel);
+        if (pax > 1) secondaryBits.push(`${pax} seats`);
+        if (blockTimeLabel) secondaryBits.push(`✈ ${blockTimeLabel}`);
+        if (r.airline && r.airline !== (prog?.airline||'')) secondaryBits.push(r.airline);
+
         let valueLine = '';
         if (r.cash_value > 0) {
           if (savings !== null) {
@@ -83,36 +109,29 @@ async function renderRedemptions() {
             const savCls = savings >= 0 ? 'c-ok' : 'c-danger';
             valueLine = `<div class="rdp-meta">
               <span class="${savCls}" style="font-weight:600">${savings>=0?'Saved':'Lost'} $${fmt(Math.abs(savings))}</span>
-              <span>vs cash $${fmt(groupCashValue)}${pax>1?` (${pax} seats)`:''} (${pct.toFixed(0)}% ${savings>=0?'off':'over'})</span>
+              <span>vs cash $${fmt(groupCashValue)}${pax>1?` (${pax} seats)`:''} (${pct.toFixed(0)}% ${savings>=0?'off':'over'}) · ≈$${fmt(groupTotalSpent)} cost${pax>1?' total':''}</span>
             </div>`;
           } else {
             valueLine = `<div class="rdp-meta"><span style="color:var(--sq-text-muted)">Cash price $${fmt(groupCashValue)}${pax>1?` (${pax} seats)`:''} · add cost-basis entries for ${prog?.name||r.program_id} to see savings</span></div>`;
           }
         }
-        listHtml += `<div class="rdp-card">
-          <div class="rdp-logo">${prog ? logoImg(prog.logo, prog.code, 32) : '<span style="font-size:10px;color:var(--sq-text-muted)">?</span>'}</div>
-          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:5px">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <div class="rdp-route">${routeDisplay}</div>
-              ${tripTypeLabel}
-              ${seatsBadge}
-              ${cabinBadge(r.cabin)}
+        listHtml += `<div class="rdp-card" style="border-left-color:${cabinColor(r.cabin)}">
+          <div class="rdp-logo-col">
+            <div class="rdp-logo">${prog ? logoImg(prog.logo, prog.code, 24) : '<span style="font-size:9px;color:var(--sq-text-muted)">?</span>'}</div>
+            <div class="rdp-logo-label">${prog?.name || r.program_id}</div>
+          </div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+            <div class="rdp-route">${routeDisplay}</div>
+            <div class="rdp-compare-row">
+              ${cabinBadge(r.cabin, true)}
+              ${mpm !== null ? `<span class="mpm-pill" title="Miles used ÷ scheduled block (gate-to-gate) minutes for this flight — a rough way to compare miles 'spent per minute of flying' across redemptions of different lengths and cabins. Per seat — unaffected by how many seats were booked. Higher isn't automatically worse: a long-haul First seat will show a high mi/min next to a short Economy hop, since both the miles and the minutes scale together.">${mpm.toFixed(2)} mi/min</span>` : ''}
+              ${valuePerMile !== null ? `<span class="value-pill" title="Cash price ÷ miles used, per seat — what each mile was actually worth on this redemption.${valueMultiple !== null ? ` That's ${valueMultiple.toFixed(1)}× your ${(cpm*100).toFixed(2)}¢/mi cost basis for these miles.` : ''}">${valuePerMile.toFixed(2)}¢/mi value</span>` : ''}
             </div>
-            <div class="rdp-meta" title="${mpm !== null ? 'Miles used ÷ scheduled block (gate-to-gate) minutes for this flight — a rough way to compare miles \'spent per minute of flying\' across redemptions of different lengths and cabins. Per seat — unaffected by how many seats were booked. Higher isn\'t automatically worse: a long-haul First seat will show a high mi/min next to a short Economy hop, since both the miles and the minutes scale together.' : ''}">
-              ${blockTimeLabel ? `<span class="block-time-pill">✈ ${blockTimeLabel}</span>` : ''}
-              ${mpm !== null ? `<span class="mpm-pill">${mpm.toFixed(2)} mi/min</span>` : ''}
-              ${dtLabel ? `<span>${dtLabel}</span>` : ''}
-              ${r.airline && r.airline !== (prog?.airline||'') ? `<span>·</span><span>${r.airline}</span>` : ''}
-              ${r.notes ? `<span>·</span><span style="font-style:italic">${r.notes}</span>` : ''}
-            </div>
+            <div class="rdp-meta">${secondaryBits.join(' <span class="rdp-dot">·</span> ')}</div>
+            ${r.notes ? `<div class="rdp-notes">${r.notes}</div>` : ''}
             ${valueLine}
           </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-            <div class="rdp-miles">${fmt(r.miles_used)} <span style="font-size:11px;font-weight:400;color:var(--sq-text-muted)">mi${pax>1?'/seat':''}</span></div>
-            ${pax > 1 ? `<div style="font-size:10px;color:var(--sq-text-muted)">${fmt(r.miles_used*pax)} mi total</div>` : ''}
-            <div class="rdp-prog">${prog?.name||r.program_id}</div>
-            ${cpm !== null ? `<div style="font-size:10px;color:var(--sq-text-muted)">≈$${fmt(groupTotalSpent)} cost${pax>1?' total':''}</div>` : ''}
-          </div>
+          <div class="rdp-miles">${fmt(r.miles_used)} <span style="font-weight:400;font-size:11px;color:var(--sq-text-muted)">mi</span></div>
           <div style="display:flex;flex-direction:column;gap:5px;margin-left:4px">
             <button class="btn btn-sm" onclick="editRedemption(${r.id})">Edit</button>
             <button class="btn btn-sm" style="color:var(--sq-danger);border-color:rgba(153,28,28,.3)" onclick="deleteRedemption(${r.id})">Del</button>
@@ -149,9 +168,9 @@ async function renderRedemptions() {
         </div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Top program</div>
-        <div class="metric-value" style="font-size:18px">${topProg}</div>
-        <div class="metric-sub">By miles redeemed</div>
+        <div class="metric-label">Avg value/mi</div>
+        <div class="metric-value gold">${avgValuePerMile !== null ? avgValuePerMile.toFixed(2)+'¢' : '—'}</div>
+        <div class="metric-sub" title="Weighted by miles used across every redemption with a cash price logged — cash price ÷ miles, not your acquisition cost basis.">${valuedMilesSum > 0 ? 'Cash price ÷ miles, weighted' : 'Log a cash price to see this'}</div>
       </div>
     </div>
     <div class="sec-hd">Route map<div class="sec-hd-line"></div></div>
@@ -184,14 +203,13 @@ function initRedemptionMap(rows) {
 
   const bounds = [];
   const seenAirports = new Set();
-  const cabinColors = {F:'rgb(151, 66, 50)', J:'rgb(37, 65, 97)', W:'rgb(31, 99, 122)', Y:'rgb(46, 112, 91)'};
 
   rows.forEach(r => {
     const stops = [r.origin, ...(r.via ? r.via.split(/\s+/) : []), r.destination].filter(Boolean);
     const coords = stops.map(airportLL).filter(Boolean);
     if (coords.length < 2) return; // need at least 2 known airports to draw a line
 
-    const color = cabinColors[r.cabin] || '#6b7da8';
+    const color = cabinColor(r.cabin);
     L.polyline(coords, {color, weight: 2.2, opacity: 0.75, dashArray: r.one_way ? null : '6 4'}).addTo(redemptionMap)
       .bindPopup(`<strong>${stops.join(' → ')}</strong><br>${cabinBadge(r.cabin).replace(/<[^>]+>/g,'')} · ${fmt(r.miles_used)} mi${r.travel_date?' · '+new Date(r.travel_date+'T00:00:00').toLocaleDateString('en-SG',{month:'short',year:'numeric'}):''}`);
     coords.forEach(c => bounds.push(c));
