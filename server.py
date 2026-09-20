@@ -230,9 +230,11 @@ def get_redemptions():
 def create_redemption():
     body = request.get_json(force=True)
     db = get_db()
+    benchmark  = float(body.get("cash_fare_benchmark",0) or 0)
+    multiplier = float(body.get("wtp_multiplier",1) or 1)
     cur = db.execute(
-        "INSERT INTO redemptions (program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes,pax) "
-        "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes,:pax)",
+        "INSERT INTO redemptions (program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,cash_fare_benchmark,wtp_multiplier,taxes_fees,block_time_minutes,pax) "
+        "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:cash_fare_benchmark,:wtp_multiplier,:taxes_fees,:block_time_minutes,:pax)",
         {
             "program_id":  str(body.get("program_id","")).strip(),
             "travel_date": str(body.get("travel_date","")).strip(),
@@ -245,7 +247,12 @@ def create_redemption():
             "airline":     str(body.get("airline","")).strip(),
             "one_way":     1 if body.get("one_way") else 0,
             "notes":       str(body.get("notes","")).strip(),
-            "cash_value":  float(body.get("cash_value",0) or 0),
+            # cash_value is kept in sync (benchmark × multiplier) for anyone
+            # inspecting the DB directly; the app itself derives value from
+            # cash_fare_benchmark/wtp_multiplier, not this column.
+            "cash_value":  benchmark * multiplier,
+            "cash_fare_benchmark": benchmark,
+            "wtp_multiplier": multiplier,
             "taxes_fees":  float(body.get("taxes_fees",0) or 0),
             "block_time_minutes": int(body.get("block_time_minutes",0) or 0),
             "pax":         max(1, int(body.get("pax",1) or 1)),
@@ -259,10 +266,13 @@ def create_redemption():
 def update_redemption(rid):
     body = request.get_json(force=True)
     db = get_db()
+    benchmark  = float(body.get("cash_fare_benchmark",0) or 0)
+    multiplier = float(body.get("wtp_multiplier",1) or 1)
     db.execute(
         "UPDATE redemptions SET program_id=:program_id, travel_date=:travel_date, "
         "miles_used=:miles_used, cabin=:cabin, route=:route, origin=:origin, destination=:destination, via=:via, "
-        "airline=:airline, one_way=:one_way, notes=:notes, cash_value=:cash_value, taxes_fees=:taxes_fees, "
+        "airline=:airline, one_way=:one_way, notes=:notes, cash_value=:cash_value, cash_fare_benchmark=:cash_fare_benchmark, "
+        "wtp_multiplier=:wtp_multiplier, taxes_fees=:taxes_fees, "
         "block_time_minutes=:block_time_minutes, pax=:pax WHERE id=:id",
         {
             "id": rid,
@@ -277,7 +287,9 @@ def update_redemption(rid):
             "airline":     str(body.get("airline","")).strip(),
             "one_way":     1 if body.get("one_way") else 0,
             "notes":       str(body.get("notes","")).strip(),
-            "cash_value":  float(body.get("cash_value",0) or 0),
+            "cash_value":  benchmark * multiplier,
+            "cash_fare_benchmark": benchmark,
+            "wtp_multiplier": multiplier,
             "taxes_fees":  float(body.get("taxes_fees",0) or 0),
             "block_time_minutes": int(body.get("block_time_minutes",0) or 0),
             "pax":         max(1, int(body.get("pax",1) or 1)),
@@ -722,11 +734,13 @@ def import_all():
     for row in data.get("redemptions", []):
         db.execute(
             "INSERT INTO redemptions "
-            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,taxes_fees,block_time_minutes,pax) "
-            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:taxes_fees,:block_time_minutes,:pax)",
+            "(program_id,travel_date,miles_used,cabin,route,origin,destination,via,airline,one_way,notes,cash_value,cash_fare_benchmark,wtp_multiplier,taxes_fees,block_time_minutes,pax) "
+            "VALUES (:program_id,:travel_date,:miles_used,:cabin,:route,:origin,:destination,:via,:airline,:one_way,:notes,:cash_value,:cash_fare_benchmark,:wtp_multiplier,:taxes_fees,:block_time_minutes,:pax)",
             {k: row.get(k,"") for k in ["program_id","travel_date","cabin","route","origin","destination","via","airline","notes"]}
             | {"miles_used": int(row.get("miles_used",0)), "one_way": int(row.get("one_way",0)),
                "cash_value": float(row.get("cash_value",0) or 0), "taxes_fees": float(row.get("taxes_fees",0) or 0),
+               "cash_fare_benchmark": float(row.get("cash_fare_benchmark",0) or 0),
+               "wtp_multiplier": float(row.get("wtp_multiplier",1) or 1),
                "block_time_minutes": int(row.get("block_time_minutes",0) or 0),
                "pax": max(1, int(row.get("pax",1) or 1))}
         )

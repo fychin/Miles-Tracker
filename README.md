@@ -16,11 +16,11 @@ Miles & Points Tracker brings the same rigor to a rewards portfolio that you'd e
 ## Tabs
 
 ### Dashboard
-Portfolio at a glance — top balances, miles/points expiring soon ("at risk"), orphan miles, transferable bank points.
+Portfolio at a glance — top balances, miles/points expiring soon ("at risk"), orphan miles, transferable bank points.  
 <img width="60%" alt="miles-tracker_dashboard" src="https://github.com/user-attachments/assets/42bbcbea-a635-47a1-b17a-e7179171878f" />
 
 ### Redemptions
-Map your award flights and uncover the true ROI of your miles. Measure your personal cash-equivalent value against true acquisition costs, including annual card fees, direct miles purchases, transfer fees, and taxes—to track your net return on every redemption.
+Map your award flights and uncover the true ROI of your miles. Measure your personal cash-equivalent value against true acquisition costs, including annual card fees, direct miles purchases, transfer fees, and taxes—to track your net return on every redemption.  
 <img width="60%" height="1511" alt="miles-tracker_redemption" src="https://github.com/user-attachments/assets/11cdb809-1d80-4ea8-a34c-073f888b5b68" />
 
 ### FFP Miles
@@ -28,7 +28,7 @@ Airline loyalty balances, grouped by alliance.
 <img width="60%" alt="miles-tracker_ffp" src="https://github.com/user-attachments/assets/6f298f49-23f9-43ea-a87f-965444ad6783" />
 
 ### Bank Points
-Credit card and wallet points balances (incl. HeyMax Max Miles), with transfer-block math.
+Credit card and wallet points balances (incl. HeyMax Max Miles), with transfer-block math.  
 <img width="60%" height="1767" alt="miles-tracker_bank" src="https://github.com/user-attachments/assets/3e8959fa-4625-4fe0-9b0b-78ab8000f30e" />
 
 ### Cost Basis

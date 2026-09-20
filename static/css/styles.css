@@ -121,6 +121,8 @@ a{color:inherit;text-decoration:none}
 .modal-logo img{width:28px;height:28px;object-fit:contain}
 .form-group{margin-bottom:12px}
 .form-label{font-size:12px;color:var(--sq-text-mid);margin-bottom:4px;display:block;font-weight:500}
+.info-icon{display:inline-flex;align-items:center;justify-content:center;color:var(--sq-text-muted);font-size:11px;cursor:help;font-weight:700}
+.info-icon:hover{color:var(--sq-gold-dark)}
 .form-input{width:100%;padding:8px 11px;border:0.5px solid var(--sq-border);border-radius:7px;font-size:14px;background:var(--sq-white);color:var(--sq-text);font-family:inherit;transition:border-color .15s}
 .form-input:focus{outline:none;border-color:var(--sq-navy);box-shadow:0 0 0 2px rgba(13,31,92,.08)}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:1rem}
@@ -174,7 +176,7 @@ a{color:inherit;text-decoration:none}
 .cabin-J{background:rgb(37, 65, 97);border:0.5px solid rgba(37, 65, 97, 0.4)}
 .cabin-W{background:rgb(31, 99, 122);border:0.5px solid rgba(31, 99, 122, 0.4)}
 .cabin-Y{background:rgb(46, 112, 91);border:0.5px solid rgba(46, 112, 91, 0.4)}
-.rdp-card{background:var(--sq-white);border:0.5px solid var(--sq-border);border-radius:8px;padding:.5rem .7rem;display:flex;align-items:center;gap:10px;margin-bottom:5px;transition:border-color .15s;border-left-width:3px;border-left-style:solid}
+.rdp-card{background:var(--sq-white);border:0.5px solid var(--sq-border);border-radius:8px;padding:.6rem .8rem;display:flex;align-items:center;gap:12px;margin-bottom:5px;transition:border-color .15s;border-left-width:3px;border-left-style:solid}
 .rdp-card:hover{border-color:var(--sq-gold);border-left-color:var(--sq-gold)}
 .rdp-route{font-size:13px;font-weight:700;color:var(--sq-navy);letter-spacing:.02em;font-variant-numeric:tabular-nums}
 .rdp-meta{font-size:10px;color:var(--sq-text-muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.3}
@@ -185,12 +187,15 @@ a{color:inherit;text-decoration:none}
 .rdp-badges .cabin-badge{text-align:center}
 .mpm-pill{display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(200,164,106,.14);color:var(--sq-gold-dark);border:0.5px solid rgba(200,164,106,.3);white-space:nowrap;line-height:13px;box-sizing:border-box;vertical-align:middle}
 .value-pill{display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(26,107,47,.1);color:var(--sq-ok);border:0.5px solid rgba(26,107,47,.28);white-space:nowrap;line-height:13px;box-sizing:border-box;vertical-align:middle}
-.rdp-miles{font-size:13px;font-weight:600;color:var(--sq-navy);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;flex-shrink:0}
+.cost-pill{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2.5px 8px;border-radius:5px;background:rgba(163,105,41,.13);color:rgb(150,92,28);border:0.5px solid rgba(163,105,41,.35);white-space:nowrap;line-height:15px;box-sizing:border-box;cursor:default}
+.cost-pill-muted{background:var(--sq-navy-light);color:var(--sq-text-muted);border-color:var(--sq-border);font-weight:600}
+.rdp-cost-breakdown{font-size:9.5px;color:var(--sq-text-muted);text-align:right;white-space:nowrap}
+.rdp-miles{font-size:16px;font-weight:700;color:var(--sq-navy);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;flex-shrink:0}
 .rdp-prog{font-size:11px;color:var(--sq-text-muted);text-align:right}
-.rdp-logo-col{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:42px}
-.rdp-logo{width:24px;height:24px;border-radius:5px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#fff;border:0.5px solid var(--sq-border);box-shadow:0 1px 2px rgba(0,0,0,0.06)}
-.rdp-logo img{width:20px;height:20px;object-fit:contain}
-.rdp-logo-label{font-size:8.5px;color:var(--sq-text-muted);text-align:center;line-height:1.1;max-width:42px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rdp-logo-col{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:52px}
+.rdp-logo{width:30px;height:30px;border-radius:6px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#fff;border:0.5px solid var(--sq-border);box-shadow:0 1px 2px rgba(0,0,0,0.06)}
+.rdp-logo img{width:25px;height:25px;object-fit:contain}
+.rdp-logo-label{font-size:9.5px;color:var(--sq-text-muted);text-align:center;line-height:1.15;max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trip-badge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.02em;white-space:nowrap;vertical-align:middle;line-height:14px;box-sizing:border-box}
 .trip-ow{background:rgba(80,80,105,.13);color:rgba(140,140,175,.95);border:0.5px solid rgba(120,120,160,.28)}
 .trip-rt{background:rgba(46,112,91,.13);color:rgb(46,112,91);border:0.5px solid rgba(46,112,91,.35)}

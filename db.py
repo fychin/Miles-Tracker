@@ -171,6 +171,18 @@ def _run_migrations(db):
         # rather than two duplicate rows. Existing rows default to 1 (no
         # behavior change for anything logged before this column existed).
         db.execute("ALTER TABLE redemptions ADD COLUMN pax INTEGER NOT NULL DEFAULT 1")
+    if "cash_fare_benchmark" not in cols:
+        # Cash-fare-benchmark + WTP-multiplier valuation model, replacing a
+        # flat cash_value entry. cash_value is kept (and still populated, as
+        # benchmark × multiplier) for any external/manual DB inspection, but
+        # the app itself now derives personal value from these two fields —
+        # rack-rate premium-cabin fares are often unrealistic to compare
+        # against, so this lets the person value a redemption at what they'd
+        # genuinely have paid (a multiple of a real, comparable cash fare)
+        # rather than an inflated one-off retail figure.
+        db.execute("ALTER TABLE redemptions ADD COLUMN cash_fare_benchmark REAL NOT NULL DEFAULT 0")
+    if "wtp_multiplier" not in cols:
+        db.execute("ALTER TABLE redemptions ADD COLUMN wtp_multiplier REAL NOT NULL DEFAULT 1")
 
     # Migration: lot-tracking fields on cost_entries (supports transfer reconciliation)
     cost_cols = {r["name"] for r in db.execute("PRAGMA table_info(cost_entries)").fetchall()}
