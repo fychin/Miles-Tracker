@@ -29,6 +29,9 @@ const FFP = [
   {id:'atmos', name:'Atmos', airline:'Alaska Airlines',                                   code:'AS',    alliance:'Oneworld',      color:'#054687',
    logo:'https://www.gstatic.com/flights/airline_logos/70px/AS.png',
    award:'https://alaskaair.com/benefits/econawardchart'},
+  {id:'jmb',   name:'JAL Mileage Bank',  airline:'Japan Airlines',                        code:'JL',    alliance:'Oneworld',      color:'#C1272D',
+   logo:'https://www.gstatic.com/flights/airline_logos/70px/JL.png',
+   award:'https://www.jal.co.jp/jp/en/jalmile/use/award_list/5000miles.html'},
 ];
 
 const ALLIANCES = ['Star Alliance','Oneworld','SkyTeam','Independent'];

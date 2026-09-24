@@ -285,6 +285,7 @@ function redemptionModal(data) {
   // editing an old entry doesn't show blank/zero fields.
   const legacyBenchmark  = d.cash_fare_benchmark > 0 ? d.cash_fare_benchmark : (d.cash_value || 0);
   const legacyMultiplier = d.cash_fare_benchmark > 0 ? (d.wtp_multiplier || 1) : 1;
+  document.querySelector('#modal .modal').classList.add('wide');
   document.getElementById('modal-hd').innerHTML = d.id ? 'Edit Redemption' : 'Log Redemption';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-row">
@@ -379,6 +380,10 @@ function redemptionModal(data) {
       <div class="ref-box" id="rdp-value-preview">Enter an estimated cash fare to see personal value and ¢/mi.</div>
     </div>`;
 
+  function vpRow(label, value, opts) {
+    opts = opts || {};
+    return `<div class="vp-row${opts.result?' vp-result':''}"><span class="vp-label">${label}</span><span class="vp-val">${value}</span></div>`;
+  }
   function updateValuePreview() {
     const progId    = document.getElementById('e-prog').value;
     const miles     = Math.max(0, Math.round(parseNum(document.getElementById('e-miles').value)));
@@ -390,34 +395,48 @@ function redemptionModal(data) {
     const box       = document.getElementById('rdp-value-preview');
     const personalValue = benchmark * multiplier;
 
-    let html = '';
+    let valueRows = '', costRows = '', resultRow = '';
+
     if (benchmark > 0) {
-      html += `Personal value: $${fmt(benchmark)} <span style="color:var(--sq-text-muted)">estimated fare</span> × ${multiplier.toFixed(2)}× = <strong>$${fmt(personalValue)}</strong> per seat`;
+      valueRows += vpRow('Estimated value', `$${fmt(benchmark)} × ${multiplier.toFixed(2)}× = <strong>$${fmt(personalValue)}</strong>/seat`);
       if (miles > 0) {
         const cpm = (personalValue - taxes) / miles * 100;
-        html += `<br>Personal CPM: <strong>${cpm.toFixed(2)}¢/mi</strong> <span style="color:var(--sq-text-muted)">(($${fmt(personalValue)} − $${fmt(taxes)} taxes) ÷ ${miles.toLocaleString()}mi)</span>`;
+        valueRows += vpRow('Value/mi', `<strong>${cpm.toFixed(2)}¢</strong> <span class="vp-sub">(net of taxes)</span>`);
       }
     }
+
     if (!progId) {
-      box.innerHTML = html || 'Select a program to see cost-basis value.';
+      box.innerHTML = valueRows ? `<div class="vp-section">${valueRows}</div>` : '<div class="vp-empty">Select a program to see cost-basis value.</div>';
       return;
     }
     if (!basis || basis.cost_per_mile <= 0) {
-      box.innerHTML = (html ? html+'<br>' : '') + `No cost-basis data for this program yet. Add entries in the <strong>Cost Basis</strong> tab to see effective savings.`;
+      box.innerHTML = (valueRows ? `<div class="vp-section">${valueRows}</div>` : '')
+        + `<div class="vp-empty">No cost-basis data for this program yet. Add entries in the <strong>Cost Basis</strong> tab to see effective savings.</div>`;
       return;
     }
+
     const milesCost  = miles * basis.cost_per_mile;
     const totalSpent = milesCost + taxes; // per-seat
-    const paxNote = pax > 1 ? ` <span class="text-muted">× ${pax} seats</span>` : '';
-    html += `${html?'<br>':''}Per seat: miles cost ≈ $${fmt(milesCost)} <span style="color:var(--sq-text-muted)">(${miles.toLocaleString()}mi × ${(basis.cost_per_mile*100).toFixed(3)}¢)</span> + $${fmt(taxes)} taxes = <strong>$${fmt(totalSpent)}</strong>${paxNote}`;
-    if (pax > 1) {
-      html += `<br>Group total (${pax} seats): <strong>$${fmt(totalSpent*pax)}</strong> out-of-pocket`;
-    }
+    costRows += vpRow('Miles cost', `${miles.toLocaleString()}mi × ${(basis.cost_per_mile*100).toFixed(3)}¢ = <strong>$${fmt(milesCost)}</strong>`);
+    costRows += vpRow('+ Taxes', `<strong>$${fmt(taxes)}</strong>`);
+    costRows += vpRow('= Cost / seat', `<strong>$${fmt(totalSpent)}</strong>`);
+    if (pax > 1) costRows += vpRow(`Total (${pax} seats)`, `<strong>$${fmt(totalSpent*pax)}</strong>`);
+
     if (personalValue > 0) {
       const groupSavings = (personalValue - totalSpent) * pax;
-      html += `<br><span style="color:${groupSavings>=0?'var(--sq-ok)':'var(--sq-danger)'};font-weight:600">${groupSavings>=0?'Saved':'Lost'} $${fmt(Math.abs(groupSavings))}</span> vs $${fmt(personalValue*pax)} value${pax>1?' for all seats':''}`;
+      const savCls = groupSavings >= 0 ? 'var(--sq-ok)' : 'var(--sq-danger)';
+      resultRow = vpRow(
+        groupSavings>=0 ? 'Saved' : 'Lost',
+        `<strong style="color:${savCls}">$${fmt(Math.abs(groupSavings))}</strong> <span class="vp-sub">vs $${fmt(personalValue*pax)} value${pax>1?' for all seats':''}</span>`,
+        {result:true}
+      );
     }
-    box.innerHTML = html;
+
+    box.innerHTML = `
+      ${valueRows ? `<div class="vp-section">${valueRows}</div>` : ''}
+      <div class="vp-section">${costRows}</div>
+      ${resultRow ? `<div class="vp-section vp-section-result">${resultRow}</div>` : ''}
+    `;
   }
   setTimeout(() => {
     ['e-prog','e-miles','e-cashbench','e-wtpmult','e-taxes','e-pax'].forEach(id => {
