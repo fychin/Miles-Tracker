@@ -154,6 +154,9 @@ a{color:inherit;text-decoration:none}
 .tbl td{padding:9px 10px;border-bottom:0.5px solid var(--sq-border-light);vertical-align:middle}
 .tbl tr:last-child td{border-bottom:none}
 .tbl tbody tr:hover td{background:var(--sq-navy-light)}
+/* Fixed column widths so every bank's table lines up with the next (auto layout sizes each table to its own content). */
+.tbl.tbl-fixed{table-layout:fixed}
+.tbl.tbl-fixed td,.tbl.tbl-fixed th{overflow:hidden;text-overflow:ellipsis}
 .tbl .notes-cell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
 .bank-cell{display:flex;align-items:center;gap:9px}
 .bank-logo{width:28px;height:28px;border-radius:5px;overflow:hidden;background:var(--sq-navy-light);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0.5px solid var(--sq-border)}

@@ -113,6 +113,7 @@ async function renderCostBasis() {
       if (rows.length === 0) return ''; // whole program has nothing live to show under this filter
       const basis = basisMap[progId];
       const isBank = isBankProgram(progId);
+      const isVarRate = isVariableRateProgram(progId); // no fixed ¢/mi equivalent — never render a fabricated 0.000
       const unitLabel = costUnitLabel(progId);
       const unitColHeader = isBank ? 'Points' : 'Miles'; // never the ambiguous "Miles/pts" — each table is one unit only
       const nativePillCents = basis ? basis.cost_per_mile*100 : 0;
@@ -129,7 +130,7 @@ async function renderCostBasis() {
       return `<div class="sec-hd" style="display:flex;align-items:center;gap:8px">
         <div style="width:20px;height:20px;border-radius:4px;overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center;border:0.5px solid var(--sq-border)">${logoImg(progLogoUrl(progId), progId.slice(0,2).toUpperCase(), 20)}</div>
         ${progLabel(progId)}
-        ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}" title="${isBank ? `Own rate: ${nativePillCents.toFixed(3)}${unitLabel} · ≈${equivPillCents.toFixed(3)}¢/mi equivalent at today's published conversion rate — the exact rate only locks in once you actually transfer.` : ''}">${nativePillCents.toFixed(3)}${unitLabel}${isBank ? ` blended <span class="text-muted">(≈${equivPillCents.toFixed(3)}¢/mi)</span>` : ' blended'} · ${fmt(basis.remaining_miles)} ${isBank?'pts':'mi'} live</span>` : ''}
+        ${basis ? `<span class="basis-pill${pillCls==='c-danger'?' over-ideal':''}" title="${isBank ? (isVarRate ? `Own rate: ${nativePillCents.toFixed(3)}${unitLabel}. No ¢/mi equivalent is shown because this program's conversion rate depends on which FFP you transfer to — the real ¢/mi is locked in when you log the transfer.` : `Own rate: ${nativePillCents.toFixed(3)}${unitLabel} · ≈${equivPillCents.toFixed(3)}¢/mi equivalent at today's published conversion rate — the exact rate only locks in once you actually transfer.`) : ''}">${nativePillCents.toFixed(3)}${unitLabel}${isBank ? (isVarRate ? ` blended <span class="text-muted">(¢/mi set at transfer)</span>` : ` blended <span class="text-muted">(≈${equivPillCents.toFixed(3)}¢/mi)</span>`) : ' blended'} · ${fmt(basis.remaining_miles)} ${isBank?'pts':'mi'} live</span>` : ''}
         ${!isBank && basis ? `<span class="basis-pill none" title="All-time totals for this FFP — includes miles later redeemed or that expired, not just what's currently live.">$${fmt(basis.total_cost)} spent · ${fmt(basis.total_miles)} mi acquired (all-time)</span>` : ''}
         <div class="sec-hd-line"></div>
       </div>
@@ -171,7 +172,7 @@ async function renderCostBasis() {
               <td style="font-weight:500">${isXfer ? transferSourceHtml(e.id, e.source) : (e.source||'—')}${statusBadge}</td>
               <td style="text-align:right" class="mono">${fmt(e.miles_acquired)}</td>
               <td style="text-align:right" class="mono">${e.cost_sgd.toFixed(2)}</td>
-              <td style="text-align:right;font-weight:${cpmCls(equivCpm)?'600':'400'};position:relative;height:32px" class="mono ${cpmCls(equivCpm)}" title="${isBank ? `Raw cost: ${nativeCpm.toFixed(3)}¢/pt — ≈${equivCpm.toFixed(3)}¢/mi equivalent at today's rate` : ''}">${isBank ? `<span style="display:block;line-height:1.3">${equivCpm.toFixed(3)}¢/mi</span><span class="text-muted" style="display:block;font-size:8.5px;font-weight:400;line-height:1.3;opacity:.7;margin-top:1px">(${nativeCpm.toFixed(3)}¢/pt)</span>` : `${equivCpm.toFixed(3)}¢/mi`}</td>
+              <td style="text-align:right;font-weight:${cpmCls(equivCpm)?'600':'400'};position:relative;height:32px" class="mono ${cpmCls(equivCpm)}" title="${isBank ? (isVarRate ? `Raw cost: ${nativeCpm.toFixed(3)}¢/pt — ¢/mi depends on the destination FFP` : `Raw cost: ${nativeCpm.toFixed(3)}¢/pt — ≈${equivCpm.toFixed(3)}¢/mi equivalent at today's rate`) : ''}">${isBank ? `<span style="display:block;line-height:1.3">${isVarRate ? '<span class="text-muted" title="Varies by destination FFP — the real ¢/mi is set when you log the transfer">varies</span>' : equivCpm.toFixed(3)+'¢/mi'}</span><span class="text-muted" style="display:block;font-size:8.5px;font-weight:400;line-height:1.3;opacity:.7;margin-top:1px">(${nativeCpm.toFixed(3)}¢/pt)</span>` : `${equivCpm.toFixed(3)}¢/mi`}</td>
               <td class="text-sm text-muted notes-cell" title="${e.notes||''}">${e.notes||''}</td>
               <td style="white-space:nowrap;text-align:right">${actions}</td>
             </tr>`;

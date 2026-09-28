@@ -32,7 +32,8 @@ function renderBank() {
       <div style="width:20px;height:20px;border-radius:4px;overflow:hidden;background:var(--sq-navy-light);display:flex;align-items:center;justify-content:center;border:0.5px solid var(--sq-border)">${logoImg(allProgs[0].logo, bank[0], 20)}</div>
       ${bank}<div class="sec-hd-line"></div>
     </div>
-    <div class="card mb-16"><table class="tbl">
+    <div class="card mb-16"><div class="table-scroll"><table class="tbl tbl-fixed">
+      <colgroup><col style="width:24%"><col style="width:11%"><col style="width:15%"><col style="width:10%"><col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:6%"></colgroup>
       <thead><tr><th>Program</th><th style="text-align:right">Points</th><th style="text-align:right">Transferable pts</th><th style="text-align:right">Miles</th><th>Rate</th><th>Min. block</th><th>Expiry</th><th></th></tr></thead>
       <tbody>
         ${progs.map(p => {
@@ -54,7 +55,7 @@ function renderBank() {
           </tr>`;
         }).join('')}
       </tbody>
-    </table></div>`;
+    </table></div></div>`;
   });
   html += `<div class="help-note">Transferable pts = points rounded down to the nearest complete block. Leftover points cannot be transferred until you accumulate another full block. Rates shown use the best available FFP transfer partner — verify with your bank before converting.</div>`;
   document.getElementById('pane-bank').innerHTML = html;
