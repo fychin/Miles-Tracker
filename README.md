@@ -29,7 +29,7 @@ Airline loyalty balances, grouped by alliance.
 
 ### Bank Points
 Credit card and wallet points balances (incl. HeyMax Max Miles), with transfer-block math.  
-<img width="60%" height="1767" alt="miles-tracker_bank" src="https://github.com/user-attachments/assets/3e8959fa-4625-4fe0-9b0b-78ab8000f30e" />
+<img width="60%" height="1767" alt="miles-tracker_bank" src="https://github.com/user-attachments/assets/ec8095a1-fd1b-4545-bcb8-44a7d17859ef" />
 
 ### Cost Basis
 The core ledger — acquisitions, transfers, and blended ¢/pt / ¢/mi per program, split cleanly between bank points and FFP miles.  
